@@ -29,6 +29,11 @@ interface PixelState {
   historyIndex: number;
   maxHistory: number;
 
+  selectedFrameIndices: number[];
+  isLoopPreviewing: boolean;
+  loopStartIndex: number;
+  loopEndIndex: number;
+
   setCurrentFrameIndex: (index: number) => void;
   getCurrentFrame: () => Frame | undefined;
 
@@ -37,6 +42,18 @@ interface PixelState {
   deleteFrame: (index: number) => void;
   moveFrame: (fromIndex: number, toIndex: number) => void;
   setFrameDelay: (index: number, delay: number) => void;
+  insertFrameAt: (frame: Frame, index: number) => void;
+
+  setSelectedFrameIndices: (indices: number[]) => void;
+  toggleFrameSelection: (index: number) => void;
+  setBatchFrameDelay: (delay: number) => void;
+  duplicateSelectedFrames: () => void;
+  deleteSelectedFrames: () => void;
+  copySelectedFrames: () => void;
+  pasteFrames: (atIndex: number) => void;
+
+  setLoopPreview: (start: number, end: number) => void;
+  setIsLoopPreviewing: (value: boolean) => void;
 
   updateCurrentFramePixels: (pixels: Uint8ClampedArray) => void;
 
@@ -46,16 +63,31 @@ interface PixelState {
 
   importFrames: (frames: Frame[]) => void;
   clearAll: () => void;
+
+  exportProject: () => string;
+  loadProject: (data: string) => void;
 }
+
+let clipboardFrames: Frame[] = [];
 
 export const usePixelStore = create<PixelState>((set, get) => {
   const initialFrame = createDefaultFrame();
+  const initialFrames = [initialFrame];
   const initialState = {
-    frames: [initialFrame],
+    frames: initialFrames,
     currentFrameIndex: 0,
-    history: [],
-    historyIndex: -1,
-    maxHistory: 50
+    history: [
+      {
+        frames: initialFrames.map(f => ({ ...f, pixels: new Uint8ClampedArray(f.pixels) })),
+        currentFrameIndex: 0
+      }
+    ],
+    historyIndex: 0,
+    maxHistory: 50,
+    selectedFrameIndices: [] as number[],
+    isLoopPreviewing: false,
+    loopStartIndex: 0,
+    loopEndIndex: 0
   };
 
   return {
@@ -139,6 +171,118 @@ export const usePixelStore = create<PixelState>((set, get) => {
       const newFrames = [...frames];
       newFrames[index] = { ...newFrames[index], delay: Math.max(1, delay) };
       set({ frames: newFrames });
+      get().pushHistory();
+    },
+
+    insertFrameAt: (frame: Frame, index: number) => {
+      const { frames } = get();
+      const newFrames = [...frames];
+      newFrames.splice(index, 0, frame);
+      set({ frames: newFrames, currentFrameIndex: index });
+      get().pushHistory();
+    },
+
+    setSelectedFrameIndices: (indices: number[]) => {
+      set({ selectedFrameIndices: indices });
+    },
+
+    toggleFrameSelection: (index: number) => {
+      const { selectedFrameIndices } = get();
+      const isSelected = selectedFrameIndices.includes(index);
+      if (isSelected) {
+        set({ selectedFrameIndices: selectedFrameIndices.filter(i => i !== index) });
+      } else {
+        set({ selectedFrameIndices: [...selectedFrameIndices, index] });
+      }
+    },
+
+    setBatchFrameDelay: (delay: number) => {
+      const { frames, selectedFrameIndices } = get();
+      if (selectedFrameIndices.length === 0) return;
+      const newFrames = [...frames];
+      selectedFrameIndices.forEach(index => {
+        if (index >= 0 && index < newFrames.length) {
+          newFrames[index] = { ...newFrames[index], delay: Math.max(1, delay) };
+        }
+      });
+      set({ frames: newFrames });
+      get().pushHistory();
+    },
+
+    duplicateSelectedFrames: () => {
+      const { frames, selectedFrameIndices } = get();
+      if (selectedFrameIndices.length === 0) return;
+      const sortedIndices = [...selectedFrameIndices].sort((a, b) => a - b);
+      const framesToDuplicate = sortedIndices.map(i => frames[i]).filter(Boolean);
+      const insertIndex = Math.max(...sortedIndices) + 1;
+      const newFrames = [...frames];
+      const newIndices: number[] = [];
+      framesToDuplicate.forEach((frame, idx) => {
+        const newFrame: Frame = {
+          id: generateId(),
+          pixels: copyPixels(frame.pixels),
+          delay: frame.delay
+        };
+        const insertPos = insertIndex + idx;
+        newFrames.splice(insertPos, 0, newFrame);
+        newIndices.push(insertPos);
+      });
+      set({ frames: newFrames, currentFrameIndex: insertIndex, selectedFrameIndices: newIndices });
+      get().pushHistory();
+    },
+
+    deleteSelectedFrames: () => {
+      const { frames, selectedFrameIndices } = get();
+      if (selectedFrameIndices.length === 0) return;
+      if (frames.length <= selectedFrameIndices.length) return;
+      const indicesToDelete = [...selectedFrameIndices].sort((a, b) => b - a);
+      const newFrames = [...frames];
+      indicesToDelete.forEach(index => {
+        newFrames.splice(index, 1);
+      });
+      const remainingIndex = Math.max(0, Math.min(...indicesToDelete) - 1);
+      set({ frames: newFrames, currentFrameIndex: remainingIndex, selectedFrameIndices: [] });
+      get().pushHistory();
+    },
+
+    copySelectedFrames: () => {
+      const { frames, selectedFrameIndices } = get();
+      if (selectedFrameIndices.length === 0) return;
+      const sortedIndices = [...selectedFrameIndices].sort((a, b) => a - b);
+      clipboardFrames = sortedIndices.map(i => ({
+        ...frames[i],
+        pixels: copyPixels(frames[i].pixels)
+      })).filter(Boolean);
+    },
+
+    pasteFrames: (atIndex: number) => {
+      if (clipboardFrames.length === 0) return;
+      const { frames } = get();
+      const newFrames = [...frames];
+      const newIndices: number[] = [];
+      clipboardFrames.forEach((frame, idx) => {
+        const newFrame: Frame = {
+          id: generateId(),
+          pixels: copyPixels(frame.pixels),
+          delay: frame.delay
+        };
+        const insertPos = atIndex + idx;
+        newFrames.splice(insertPos, 0, newFrame);
+        newIndices.push(insertPos);
+      });
+      set({ frames: newFrames, currentFrameIndex: atIndex, selectedFrameIndices: newIndices });
+      get().pushHistory();
+    },
+
+    setLoopPreview: (start: number, end: number) => {
+      const { frames } = get();
+      const validStart = Math.max(0, Math.min(start, frames.length - 1));
+      const validEnd = Math.max(validStart, Math.min(end, frames.length - 1));
+      set({ loopStartIndex: validStart, loopEndIndex: validEnd, isLoopPreviewing: true });
+    },
+
+    setIsLoopPreviewing: (value: boolean) => {
+      set({ isLoopPreviewing: value });
     },
 
     updateCurrentFramePixels: (pixels: Uint8ClampedArray) => {
@@ -212,9 +356,53 @@ export const usePixelStore = create<PixelState>((set, get) => {
         frames: [newFrame],
         currentFrameIndex: 0,
         history: [],
-        historyIndex: -1
+        historyIndex: -1,
+        selectedFrameIndices: [],
+        isLoopPreviewing: false
       });
       get().pushHistory();
+    },
+
+    exportProject: () => {
+      const { frames, currentFrameIndex } = get();
+      const serialized = {
+        frames: frames.map(f => ({
+          id: f.id,
+          pixels: Array.from(f.pixels),
+          delay: f.delay
+        })),
+        currentFrameIndex,
+        version: '1.0',
+        exportedAt: new Date().toISOString()
+      };
+      return JSON.stringify(serialized);
+    },
+
+    loadProject: (data: string) => {
+      try {
+        const parsed = JSON.parse(data);
+        if (!parsed.frames || !Array.isArray(parsed.frames)) return;
+        
+        const frames: Frame[] = parsed.frames.map((f: { id: string; pixels: number[]; delay: number }) => ({
+          id: f.id || generateId(),
+          pixels: new Uint8ClampedArray(f.pixels),
+          delay: f.delay || DEFAULT_DELAY
+        }));
+        
+        if (frames.length === 0) return;
+        
+        set({
+          frames,
+          currentFrameIndex: Math.min(parsed.currentFrameIndex || 0, frames.length - 1),
+          history: [],
+          historyIndex: -1,
+          selectedFrameIndices: [],
+          isLoopPreviewing: false
+        });
+        get().pushHistory();
+      } catch (e) {
+        console.error('Failed to load project:', e);
+      }
     }
   };
 });

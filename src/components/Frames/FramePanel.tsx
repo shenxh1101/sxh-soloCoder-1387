@@ -1,8 +1,7 @@
-import { useRef, useEffect } from 'react';
-import { Plus, Trash2, Copy, ChevronLeft, ChevronRight, GripVertical } from 'lucide-react';
+import { useRef, useEffect, useState } from 'react';
+import { Plus, Trash2, Copy, ChevronLeft, ChevronRight, GripVertical, Play, Pause, Scissors, Clipboard, Clock } from 'lucide-react';
 import { usePixelStore } from '@/store/usePixelStore';
 import { createFrameThumbnailDataUrl } from '@/utils/exportUtils';
-import { useState } from 'react';
 
 export default function FramePanel() {
   const frames = usePixelStore(state => state.frames);
@@ -13,10 +12,27 @@ export default function FramePanel() {
   const deleteFrame = usePixelStore(state => state.deleteFrame);
   const moveFrame = usePixelStore(state => state.moveFrame);
   const setFrameDelay = usePixelStore(state => state.setFrameDelay);
+  const selectedFrameIndices = usePixelStore(state => state.selectedFrameIndices);
+  const setSelectedFrameIndices = usePixelStore(state => state.setSelectedFrameIndices);
+  const toggleFrameSelection = usePixelStore(state => state.toggleFrameSelection);
+  const setBatchFrameDelay = usePixelStore(state => state.setBatchFrameDelay);
+  const duplicateSelectedFrames = usePixelStore(state => state.duplicateSelectedFrames);
+  const deleteSelectedFrames = usePixelStore(state => state.deleteSelectedFrames);
+  const copySelectedFrames = usePixelStore(state => state.copySelectedFrames);
+  const pasteFrames = usePixelStore(state => state.pasteFrames);
+  const isLoopPreviewing = usePixelStore(state => state.isLoopPreviewing);
+  const loopStartIndex = usePixelStore(state => state.loopStartIndex);
+  const loopEndIndex = usePixelStore(state => state.loopEndIndex);
+  const setLoopPreview = usePixelStore(state => state.setLoopPreview);
+  const setIsLoopPreviewing = usePixelStore(state => state.setIsLoopPreviewing);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
+  const [showBatchDelay, setShowBatchDelay] = useState(false);
+  const [batchDelayValue, setBatchDelayValue] = useState(100);
+  const [hasClipboard, setHasClipboard] = useState(false);
 
   const scrollToFrame = (index: number) => {
     const container = scrollRef.current;
@@ -31,6 +47,27 @@ export default function FramePanel() {
   useEffect(() => {
     scrollToFrame(currentFrameIndex);
   }, [currentFrameIndex]);
+
+  const handleFrameClick = (e: React.MouseEvent, index: number) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      toggleFrameSelection(index);
+      setLastSelectedIndex(index);
+    } else if (e.shiftKey && lastSelectedIndex !== null) {
+      e.preventDefault();
+      const start = Math.min(lastSelectedIndex, index);
+      const end = Math.max(lastSelectedIndex, index);
+      const newSelection: number[] = [];
+      for (let i = start; i <= end; i++) {
+        newSelection.push(i);
+      }
+      setSelectedFrameIndices(newSelection);
+    } else {
+      setSelectedFrameIndices([]);
+      setLastSelectedIndex(index);
+      setCurrentFrameIndex(index);
+    }
+  };
 
   const handleDragStart = (e: React.DragEvent, index: number) => {
     setDragIndex(index);
@@ -56,14 +93,134 @@ export default function FramePanel() {
     setDragOverIndex(null);
   };
 
+  const handleBatchDelay = () => {
+    if (selectedFrameIndices.length > 0) {
+      setBatchDelayValue(frames[selectedFrameIndices[0]]?.delay || 100);
+      setShowBatchDelay(true);
+    }
+  };
+
+  const applyBatchDelay = () => {
+    setBatchFrameDelay(batchDelayValue);
+    setShowBatchDelay(false);
+  };
+
+  const handleLoopPreview = () => {
+    if (selectedFrameIndices.length >= 2) {
+      const sorted = [...selectedFrameIndices].sort((a, b) => a - b);
+      setLoopPreview(sorted[0], sorted[sorted.length - 1]);
+    } else if (isLoopPreviewing) {
+      setIsLoopPreviewing(false);
+    }
+  };
+
+  const handlePaste = () => {
+    const insertIndex = currentFrameIndex + 1;
+    pasteFrames(insertIndex);
+  };
+
+  useEffect(() => {
+    const checkClipboard = () => {
+      const state = usePixelStore.getState();
+      setHasClipboard(state.selectedFrameIndices.length > 0 ? true : hasClipboard);
+    };
+    return () => {};
+  }, [selectedFrameIndices, hasClipboard]);
+
   return (
-    <div className="h-28 bg-pixel-surface border-t-2 border-pixel-border flex flex-col">
+    <div className="h-36 bg-pixel-surface border-t-2 border-pixel-border flex flex-col">
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-pixel-border">
         <div className="flex items-center gap-2">
           <span className="text-xs text-pixel-text-muted font-mono">帧</span>
           <span className="text-xs text-pixel-primary font-mono">{frames.length} 帧</span>
+          {selectedFrameIndices.length > 0 && (
+            <span className="text-xs text-pixel-accent font-mono bg-pixel-accent/20 px-2 py-0.5">
+              已选 {selectedFrameIndices.length} 帧
+            </span>
+          )}
+          {isLoopPreviewing && (
+            <span className="text-xs text-pixel-primary font-mono bg-pixel-primary/20 px-2 py-0.5">
+              循环预览: {loopStartIndex + 1}-{loopEndIndex + 1}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1">
+          {selectedFrameIndices.length > 0 && (
+            <>
+              <button
+                onClick={handleBatchDelay}
+                className="p-1.5 hover:bg-pixel-surface-light text-pixel-text-muted hover:text-pixel-text transition-colors"
+                title="批量设置时长"
+              >
+                <Clock size={14} />
+              </button>
+              <button
+                onClick={copySelectedFrames}
+                className="p-1.5 hover:bg-pixel-surface-light text-pixel-text-muted hover:text-pixel-text transition-colors"
+                title="复制选中帧 (Ctrl+C)"
+              >
+                <Copy size={14} />
+              </button>
+              <button
+                onClick={handlePaste}
+                className="p-1.5 hover:bg-pixel-surface-light text-pixel-text-muted hover:text-pixel-text transition-colors"
+                title="粘贴帧 (Ctrl+V)"
+              >
+                <Clipboard size={14} />
+              </button>
+              <button
+                onClick={duplicateSelectedFrames}
+                className="p-1.5 hover:bg-pixel-surface-light text-pixel-text-muted hover:text-pixel-text transition-colors"
+                title="复制选中帧"
+              >
+                <Scissors size={14} />
+              </button>
+              <button
+                onClick={deleteSelectedFrames}
+                className="p-1.5 hover:bg-pixel-surface-light text-pixel-text-muted hover:text-pixel-danger transition-colors"
+                title="删除选中帧 (Delete)"
+              >
+                <Trash2 size={14} />
+              </button>
+              {selectedFrameIndices.length >= 2 && (
+                <button
+                  onClick={handleLoopPreview}
+                  className={`p-1.5 transition-colors ${isLoopPreviewing ? 'text-pixel-primary bg-pixel-primary/20' : 'text-pixel-text-muted hover:text-pixel-primary hover:bg-pixel-surface-light'}`}
+                  title={isLoopPreviewing ? '停止循环预览' : '循环预览选中帧'}
+                >
+                  {isLoopPreviewing ? <Pause size={14} /> : <Play size={14} />}
+                </button>
+              )}
+              <div className="w-px h-5 bg-pixel-border mx-1" />
+            </>
+          )}
+          {showBatchDelay && (
+            <div className="flex items-center gap-1 bg-pixel-bg px-2 py-1 border border-pixel-border">
+              <input
+                type="number"
+                value={batchDelayValue}
+                onChange={(e) => setBatchDelayValue(parseInt(e.target.value) || 100)}
+                className="w-16 text-xs font-mono bg-pixel-surface border border-pixel-border text-pixel-text px-1 py-0.5"
+                min="1"
+                max="10000"
+                autoFocus
+                onKeyDown={(e) => e.key === 'Enter' && applyBatchDelay()}
+              />
+              <span className="text-xs font-mono text-pixel-text-muted">ms</span>
+              <button
+                onClick={applyBatchDelay}
+                className="text-xs bg-pixel-primary text-white px-2 py-0.5 font-mono"
+              >
+                确定
+              </button>
+              <button
+                onClick={() => setShowBatchDelay(false)}
+                className="text-xs bg-pixel-surface text-pixel-text px-2 py-0.5 font-mono border border-pixel-border"
+              >
+                取消
+              </button>
+            </div>
+          )}
           <button
             onClick={() => setCurrentFrameIndex(Math.max(0, currentFrameIndex - 1))}
             className="p-1 hover:bg-pixel-surface-light text-pixel-text-muted hover:text-pixel-text transition-colors"
@@ -92,9 +249,11 @@ export default function FramePanel() {
               frame={frame}
               index={index}
               isActive={index === currentFrameIndex}
+              isSelected={selectedFrameIndices.includes(index)}
+              isInLoopRange={isLoopPreviewing && index >= loopStartIndex && index <= loopEndIndex}
               isDragging={dragIndex === index}
               isDragOver={dragOverIndex === index}
-              onClick={() => setCurrentFrameIndex(index)}
+              onClick={(e) => handleFrameClick(e, index)}
               onDuplicate={() => duplicateFrame(index)}
               onDelete={() => deleteFrame(index)}
               onDelayChange={(delay) => setFrameDelay(index, delay)}
@@ -115,6 +274,12 @@ export default function FramePanel() {
           </button>
         </div>
       </div>
+
+      <div className="px-3 py-1 border-t border-pixel-border flex items-center gap-2">
+        <span className="text-[10px] text-pixel-text-muted font-mono">
+          提示: Shift+点击 连续选择 | Ctrl+点击 多选 | Ctrl+C/V 复制粘贴帧
+        </span>
+      </div>
     </div>
   );
 }
@@ -123,9 +288,11 @@ interface FrameThumbnailProps {
   frame: { id: string; pixels: Uint8ClampedArray; delay: number };
   index: number;
   isActive: boolean;
+  isSelected: boolean;
+  isInLoopRange: boolean;
   isDragging: boolean;
   isDragOver: boolean;
-  onClick: () => void;
+  onClick: (e: React.MouseEvent) => void;
   onDuplicate: () => void;
   onDelete: () => void;
   onDelayChange: (delay: number) => void;
@@ -139,6 +306,8 @@ function FrameThumbnail({
   frame,
   index,
   isActive,
+  isSelected,
+  isInLoopRange,
   isDragging,
   isDragOver,
   onClick,
@@ -162,9 +331,11 @@ function FrameThumbnail({
     <div
       className={`
         frame-thumbnail relative flex-shrink-0
-        ${isActive ? 'ring-2 ring-pixel-primary' : 'border-2 border-pixel-border'}
+        ${isSelected ? 'ring-2 ring-pixel-accent' : isActive ? 'ring-2 ring-pixel-primary' : 'border-2 border-pixel-border'}
+        ${isInLoopRange ? 'ring-2 ring-pixel-primary ring-offset-1 ring-offset-pixel-bg' : ''}
         ${isDragging ? 'opacity-50' : ''}
         ${isDragOver ? 'ring-2 ring-pixel-accent' : ''}
+        ${isSelected ? 'bg-pixel-accent/10' : ''}
         group cursor-pointer
       `}
       draggable
@@ -174,10 +345,18 @@ function FrameThumbnail({
       onDrop={onDrop}
       onDragEnd={onDragEnd}
     >
+      {isSelected && (
+        <div className="absolute top-0 left-0 z-20">
+          <div className="w-3 h-3 bg-pixel-accent flex items-center justify-center">
+            <div className="w-1.5 h-1.5 bg-white" />
+          </div>
+        </div>
+      )}
+
       <div className="absolute top-0.5 left-0.5 z-10 flex items-center gap-1">
         <span className={`
           text-[10px] font-mono px-1
-          ${isActive ? 'bg-pixel-primary text-white' : 'bg-black/60 text-white'}
+          ${isActive ? 'bg-pixel-primary text-white' : isSelected ? 'bg-pixel-accent text-white' : 'bg-black/60 text-white'}
         `}>
           {index + 1}
         </span>

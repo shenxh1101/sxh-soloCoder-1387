@@ -1,4 +1,4 @@
-export type ToolType = 'pencil' | 'eraser' | 'fill' | 'eyedropper' | 'rectangle' | 'circle' | 'line';
+export type ToolType = 'pencil' | 'eraser' | 'fill' | 'eyedropper' | 'rectangle' | 'circle' | 'line' | 'select';
 
 export interface Frame {
   id: string;
@@ -35,6 +35,38 @@ export interface CanvasState {
   showOnionSkin: boolean;
   onionSkinOpacity: number;
   onionSkinFrames: number;
+}
+
+export interface Selection {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface SelectionState {
+  selection: Selection | null;
+  selectionPixels: Uint8ClampedArray | null;
+  isDraggingSelection: boolean;
+  dragOffset: { x: number; y: number };
+  clipboardPixels: Uint8ClampedArray | null;
+  clipboardSize: { width: number; height: number } | null;
+
+  startSelection: (x: number, y: number) => void;
+  updateSelection: (x: number, y: number) => void;
+  finishSelection: () => void;
+  clearSelection: () => void;
+
+  startDragging: (x: number, y: number) => boolean;
+  updateDragPosition: (x: number, y: number) => void;
+  finishDragging: () => void;
+
+  copySelection: () => void;
+  cutSelection: () => void;
+  pasteSelection: (x: number, y: number) => void;
+
+  flipSelectionHorizontal: () => void;
+  flipSelectionVertical: () => void;
 }
 
 export interface Point {

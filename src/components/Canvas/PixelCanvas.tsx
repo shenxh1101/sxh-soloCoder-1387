@@ -2,9 +2,10 @@ import { useRef, useEffect, useCallback, useState } from 'react';
 import { usePixelStore } from '@/store/usePixelStore';
 import { useToolStore } from '@/store/useToolStore';
 import { useCanvasStore } from '@/store/useCanvasStore';
+import { useSelectionStore } from '@/store/useSelectionStore';
 import { hexToRgba, copyPixels } from '@/utils/colorUtils';
 import { drawLine, drawBrush, floodFill, drawRectangle, drawCircle } from '@/utils/pixelUtils';
-import type { RGBA } from '@/types';
+import type { RGBA, ToolType } from '@/types';
 
 const CANVAS_SIZE = 32;
 
@@ -20,7 +21,7 @@ export default function PixelCanvas() {
   const updateCurrentFramePixels = usePixelStore(state => state.updateCurrentFramePixels);
   const pushHistory = usePixelStore(state => state.pushHistory);
 
-  const currentTool = useToolStore(state => state.currentTool);
+  const currentTool = useToolStore(state => state.currentTool) as ToolType;
   const brushSize = useToolStore(state => state.brushSize);
   const primaryColor = useToolStore(state => state.primaryColor);
   const secondaryColor = useToolStore(state => state.secondaryColor);
@@ -32,9 +33,35 @@ export default function PixelCanvas() {
   const onionSkinOpacity = useCanvasStore(state => state.onionSkinOpacity);
   const onionSkinFrames = useCanvasStore(state => state.onionSkinFrames);
 
+  const selection = useSelectionStore(state => state.selection);
+  const selectionPixels = useSelectionStore(state => state.selectionPixels);
+  const isDraggingSelection = useSelectionStore(state => state.isDraggingSelection);
+  const startSelection = useSelectionStore(state => state.startSelection);
+  const updateSelection = useSelectionStore(state => state.updateSelection);
+  const finishSelection = useSelectionStore(state => state.finishSelection);
+  const clearSelection = useSelectionStore(state => state.clearSelection);
+  const startDragging = useSelectionStore(state => state.startDragging);
+  const updateDragPosition = useSelectionStore(state => state.updateDragPosition);
+  const finishDragging = useSelectionStore(state => state.finishDragging);
+  const pasteSelection = useSelectionStore(state => state.pasteSelection);
+
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
 
   const currentFrame = frames[currentFrameIndex];
+
+  useEffect(() => {
+    useSelectionStore.setState({
+      getCurrentFramePixels: () => currentFrame ? currentFrame.pixels : new Uint8ClampedArray(),
+      updateCurrentFramePixels,
+      pushHistory
+    });
+  }, [currentFrame, updateCurrentFramePixels, pushHistory]);
+
+  useEffect(() => {
+    if (currentTool !== 'select') {
+      clearSelection();
+    }
+  }, [currentTool, clearSelection]);
 
   const getPixelPos = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -97,10 +124,14 @@ export default function PixelCanvas() {
       drawGrid(ctx, canvasSize, zoom);
     }
 
+    if (selection && !isDraggingSelection) {
+      drawSelectionOverlay(ctx, selection, zoom);
+    }
+
     if (cursorPos && currentTool !== 'eyedropper') {
       drawCursorPreview(ctx, cursorPos.x, cursorPos.y, zoom, brushSize, currentTool);
     }
-  }, [currentFrame, frames, currentFrameIndex, zoom, showGrid, showOnionSkin, onionSkinOpacity, onionSkinFrames, cursorPos, brushSize, currentTool]);
+  }, [currentFrame, frames, currentFrameIndex, zoom, showGrid, showOnionSkin, onionSkinOpacity, onionSkinFrames, cursorPos, brushSize, currentTool, selection, isDraggingSelection]);
 
   useEffect(() => {
     renderCanvas();
@@ -110,10 +141,28 @@ export default function PixelCanvas() {
     const pos = getPixelPos(e);
     if (!pos || !currentFrame) return;
 
+    const color = e.button === 2 ? hexToRgba(secondaryColor) : hexToRgba(primaryColor);
+
+    if (currentTool === 'select') {
+      if (e.button === 0) {
+        const started = startDragging(pos.x, pos.y);
+        if (!started) {
+          clearSelection();
+          startSelection(pos.x, pos.y);
+          isDrawingRef.current = true;
+        } else {
+          isDrawingRef.current = true;
+        }
+      }
+      return;
+    }
+
+    if (currentTool !== 'select') {
+      clearSelection();
+    }
+
     isDrawingRef.current = true;
     lastPosRef.current = pos;
-
-    const color = e.button === 2 ? hexToRgba(secondaryColor) : hexToRgba(primaryColor);
 
     if (currentTool === 'eyedropper') {
       const index = (pos.y * CANVAS_SIZE + pos.x) * 4;
@@ -141,7 +190,8 @@ export default function PixelCanvas() {
     }
 
     previewPixelsRef.current = copyPixels(currentFrame.pixels);
-    drawBrush(previewPixelsRef.current, pos.x, pos.y, CANVAS_SIZE, color, brushSize);
+    const drawColor = currentTool === 'eraser' ? [0, 0, 0, 0] as RGBA : color;
+    drawBrush(previewPixelsRef.current, pos.x, pos.y, CANVAS_SIZE, drawColor, brushSize);
     updateCurrentFramePixels(previewPixelsRef.current);
   };
 
@@ -149,7 +199,18 @@ export default function PixelCanvas() {
     const pos = getPixelPos(e);
     setCursorPos(pos);
 
-    if (!isDrawingRef.current || !pos || !previewPixelsRef.current) return;
+    if (!isDrawingRef.current || !pos) return;
+
+    if (currentTool === 'select') {
+      if (isDraggingSelection) {
+        updateDragPosition(pos.x, pos.y);
+      } else {
+        updateSelection(pos.x, pos.y);
+      }
+      return;
+    }
+
+    if (!previewPixelsRef.current) return;
 
     const color = e.buttons === 2 ? hexToRgba(secondaryColor) : hexToRgba(primaryColor);
     const lastPos = lastPosRef.current;
@@ -180,7 +241,19 @@ export default function PixelCanvas() {
     }
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const pos = getPixelPos(e);
+
+    if (currentTool === 'select') {
+      if (isDraggingSelection) {
+        finishDragging();
+      } else {
+        finishSelection();
+      }
+      isDrawingRef.current = false;
+      return;
+    }
+
     if (isDrawingRef.current) {
       pushHistory();
     }
@@ -192,6 +265,15 @@ export default function PixelCanvas() {
 
   const handleMouseLeave = () => {
     setCursorPos(null);
+
+    if (currentTool === 'select') {
+      if (isDraggingSelection) {
+        finishDragging();
+      }
+      isDrawingRef.current = false;
+      return;
+    }
+
     if (isDrawingRef.current) {
       pushHistory();
     }
@@ -211,6 +293,15 @@ export default function PixelCanvas() {
     }
   };
 
+  const handleDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const pos = getPixelPos(e);
+    if (!pos) return;
+
+    if ((e.ctrlKey || e.metaKey) && e.button === 0) {
+      pasteSelection(pos.x, pos.y);
+    }
+  };
+
   return (
     <div className="flex items-center justify-center w-full h-full overflow-hidden bg-pixel-bg p-4">
       <div className="relative">
@@ -224,6 +315,8 @@ export default function PixelCanvas() {
             onMouseLeave={handleMouseLeave}
             onContextMenu={handleContextMenu}
             onWheel={handleWheel}
+            onDoubleClick={handleDoubleClick}
+            style={{ cursor: currentTool === 'select' ? 'default' : 'crosshair' }}
           />
         </div>
 
@@ -302,6 +395,47 @@ function drawGrid(ctx: CanvasRenderingContext2D, canvasSize: number, zoom: numbe
   }
 }
 
+function drawSelectionOverlay(
+  ctx: CanvasRenderingContext2D,
+  selection: { x: number; y: number; width: number; height: number },
+  zoom: number
+) {
+  const px = selection.x * zoom;
+  const py = selection.y * zoom;
+  const pw = selection.width * zoom;
+  const ph = selection.height * zoom;
+
+  ctx.fillStyle = 'rgba(168, 85, 247, 0.15)';
+  ctx.fillRect(px, py, pw, ph);
+
+  ctx.strokeStyle = '#a855f7';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([4, 4]);
+  ctx.strokeRect(px + 1, py + 1, pw - 2, ph - 2);
+  ctx.setLineDash([]);
+
+  const handleSize = 6;
+  const handles = [
+    [px, py],
+    [px + pw / 2, py],
+    [px + pw, py],
+    [px + pw, py + ph / 2],
+    [px + pw, py + ph],
+    [px + pw / 2, py + ph],
+    [px, py + ph],
+    [px, py + ph / 2],
+  ];
+
+  ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = '#a855f7';
+  ctx.lineWidth = 1;
+
+  handles.forEach(([hx, hy]) => {
+    ctx.fillRect(hx - handleSize / 2, hy - handleSize / 2, handleSize, handleSize);
+    ctx.strokeRect(hx - handleSize / 2, hy - handleSize / 2, handleSize, handleSize);
+  });
+}
+
 function drawCursorPreview(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -321,7 +455,7 @@ function drawCursorPreview(
     const size = brushSize * zoom;
     const offset = brushSize % 2 === 0 ? zoom / 2 : 0;
     ctx.strokeRect(px - size / 2 + offset, py - size / 2 + offset, size, size);
-  } else if (tool === 'fill' || tool === 'eyedropper') {
+  } else if (tool === 'fill' || tool === 'eyedropper' || tool === 'select') {
     ctx.strokeRect(px, py, zoom, zoom);
   } else {
     ctx.strokeRect(px, py, zoom, zoom);

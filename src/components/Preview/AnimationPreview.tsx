@@ -10,6 +10,10 @@ export default function AnimationPreview() {
   const frames = usePixelStore(state => state.frames);
   const currentFrameIndex = usePixelStore(state => state.currentFrameIndex);
   const setCurrentFrameIndex = usePixelStore(state => state.setCurrentFrameIndex);
+  const isLoopPreviewing = usePixelStore(state => state.isLoopPreviewing);
+  const loopStartIndex = usePixelStore(state => state.loopStartIndex);
+  const loopEndIndex = usePixelStore(state => state.loopEndIndex);
+  const setIsLoopPreviewing = usePixelStore(state => state.setIsLoopPreviewing);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [previewZoom, setPreviewZoom] = useState(4);
@@ -53,12 +57,20 @@ export default function AnimationPreview() {
     setCurrentFrameIndex(currentIndex);
 
     let nextIndex = currentIndex + 1;
-    if (nextIndex >= frames.length) {
-      if (loop) {
-        nextIndex = 0;
-      } else {
-        setIsPlaying(false);
-        return;
+    const totalFrames = frames.length;
+
+    if (isLoopPreviewing) {
+      if (nextIndex > loopEndIndex) {
+        nextIndex = loopStartIndex;
+      }
+    } else {
+      if (nextIndex >= totalFrames) {
+        if (loop) {
+          nextIndex = 0;
+        } else {
+          setIsPlaying(false);
+          return;
+        }
       }
     }
 
@@ -70,7 +82,11 @@ export default function AnimationPreview() {
 
   const togglePlay = () => {
     if (!isPlaying) {
-      playIndexRef.current = currentFrameIndex;
+      if (isLoopPreviewing) {
+        playIndexRef.current = loopStartIndex;
+      } else {
+        playIndexRef.current = currentFrameIndex;
+      }
     }
     setIsPlaying(!isPlaying);
   };
@@ -95,13 +111,24 @@ export default function AnimationPreview() {
     <div className="panel p-3 w-64">
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-xs font-bold text-pixel-text font-mono">预览</h3>
-        <button
-          onClick={() => setShowSettings(!showSettings)}
-          className={`p-1 ${showSettings ? 'text-pixel-primary' : 'text-pixel-text-muted'} hover:text-pixel-text transition-colors`}
-          title="设置"
-        >
-          <Settings size={14} />
-        </button>
+        <div className="flex items-center gap-1">
+          {isLoopPreviewing && (
+            <button
+              onClick={() => setIsLoopPreviewing(false)}
+              className="text-[10px] bg-pixel-primary/20 text-pixel-primary px-1.5 py-0.5 font-mono hover:bg-pixel-primary/30 transition-colors"
+              title="停止循环预览"
+            >
+              预览中: {loopStartIndex + 1}-{loopEndIndex + 1}
+            </button>
+          )}
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className={`p-1 ${showSettings ? 'text-pixel-primary' : 'text-pixel-text-muted'} hover:text-pixel-text transition-colors`}
+            title="设置"
+          >
+            <Settings size={14} />
+          </button>
+        </div>
       </div>
 
       <div className="flex justify-center mb-3">

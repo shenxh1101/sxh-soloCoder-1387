@@ -15,14 +15,16 @@ import {
   RotateCcw,
   FlipHorizontal,
   FlipVertical,
-  Download,
-  Upload,
-  FileJson,
-  Image
+  Image,
+  MousePointer,
+  Copy,
+  Scissors,
+  Clipboard
 } from 'lucide-react';
 import { useToolStore } from '@/store/useToolStore';
 import { usePixelStore } from '@/store/usePixelStore';
 import { useCanvasStore } from '@/store/useCanvasStore';
+import { useSelectionStore } from '@/store/useSelectionStore';
 import type { ToolType } from '@/types';
 import { flipHorizontal, flipVertical } from '@/utils/pixelUtils';
 import { copyPixels } from '@/utils/colorUtils';
@@ -72,7 +74,16 @@ export default function Toolbar() {
   const showOnionSkin = useCanvasStore(state => state.showOnionSkin);
   const toggleOnionSkin = useCanvasStore(state => state.toggleOnionSkin);
 
+  const selection = useSelectionStore(state => state.selection);
+  const clipboardPixels = useSelectionStore(state => state.clipboardPixels);
+  const copySelection = useSelectionStore(state => state.copySelection);
+  const cutSelection = useSelectionStore(state => state.cutSelection);
+  const flipSelectionHorizontal = useSelectionStore(state => state.flipSelectionHorizontal);
+  const flipSelectionVertical = useSelectionStore(state => state.flipSelectionVertical);
+  const clearSelection = useSelectionStore(state => state.clearSelection);
+
   const tools: { type: ToolType; icon: React.ReactNode; label: string; shortcut: string }[] = [
+    { type: 'select', icon: <MousePointer size={18} />, label: '选区', shortcut: 'V' },
     { type: 'pencil', icon: <Pencil size={18} />, label: '铅笔', shortcut: 'P' },
     { type: 'eraser', icon: <Eraser size={18} />, label: '橡皮擦', shortcut: 'E' },
     { type: 'fill', icon: <PaintBucket size={18} />, label: '填充', shortcut: 'G' },
@@ -179,6 +190,37 @@ export default function Toolbar() {
       </div>
 
       <div className="w-8 h-0.5 bg-pixel-border my-2" />
+
+      {selection && (
+        <>
+          <div className="flex flex-col gap-1 mb-2">
+            <div className="text-[9px] text-pixel-primary font-mono text-center">选区操作</div>
+            <ToolButton
+              icon={<Copy size={16} />}
+              label="复制选区"
+              shortcut="Ctrl+C"
+              onClick={copySelection}
+            />
+            <ToolButton
+              icon={<Scissors size={16} />}
+              label="剪切选区"
+              shortcut="Ctrl+X"
+              onClick={cutSelection}
+            />
+            <ToolButton
+              icon={<FlipHorizontal size={16} />}
+              label="水平翻转选区"
+              onClick={flipSelectionHorizontal}
+            />
+            <ToolButton
+              icon={<FlipVertical size={16} />}
+              label="垂直翻转选区"
+              onClick={flipSelectionVertical}
+            />
+          </div>
+          <div className="w-8 h-0.5 bg-pixel-border my-2" />
+        </>
+      )}
 
       <div className="flex flex-col gap-1 mb-2">
         <ToolButton
