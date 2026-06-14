@@ -36,6 +36,8 @@ export default function PixelCanvas() {
   const selection = useSelectionStore(state => state.selection);
   const selectionPixels = useSelectionStore(state => state.selectionPixels);
   const isDraggingSelection = useSelectionStore(state => state.isDraggingSelection);
+  const isAltDragging = useSelectionStore(state => state.isAltDragging);
+  const dragPreviewPos = useSelectionStore(state => state.dragPreviewPos);
   const startSelection = useSelectionStore(state => state.startSelection);
   const updateSelection = useSelectionStore(state => state.updateSelection);
   const finishSelection = useSelectionStore(state => state.finishSelection);
@@ -124,14 +126,34 @@ export default function PixelCanvas() {
       drawGrid(ctx, canvasSize, zoom);
     }
 
-    if (selection && !isDraggingSelection) {
-      drawSelectionOverlay(ctx, selection, zoom);
+    if (selection) {
+      if (isDraggingSelection && dragPreviewPos && selectionPixels) {
+        const origSelectionOverlay = {
+          x: selection.x,
+          y: selection.y,
+          width: selection.width,
+          height: selection.height
+        };
+        const color = isAltDragging ? 'rgba(34,197,94,' : 'rgba(168,85,247,';
+        drawSelectionOverlay(ctx, origSelectionOverlay, zoom, color + '0.15)', color + '0.5)');
+
+        drawDragPreview(ctx, selectionPixels, dragPreviewPos, selection.width, selection.height, zoom);
+        const previewOverlay = {
+          x: dragPreviewPos.x,
+          y: dragPreviewPos.y,
+          width: selection.width,
+          height: selection.height
+        };
+        drawSelectionOverlay(ctx, previewOverlay, zoom, 'rgba(168,85,247,0.25)', isAltDragging ? '#22c55e' : '#a855f7');
+      } else if (!isDraggingSelection) {
+        drawSelectionOverlay(ctx, selection, zoom);
+      }
     }
 
     if (cursorPos && currentTool !== 'eyedropper') {
       drawCursorPreview(ctx, cursorPos.x, cursorPos.y, zoom, brushSize, currentTool);
     }
-  }, [currentFrame, frames, currentFrameIndex, zoom, showGrid, showOnionSkin, onionSkinOpacity, onionSkinFrames, cursorPos, brushSize, currentTool, selection, isDraggingSelection]);
+  }, [currentFrame, frames, currentFrameIndex, zoom, showGrid, showOnionSkin, onionSkinOpacity, onionSkinFrames, cursorPos, brushSize, currentTool, selection, selectionPixels, isDraggingSelection, isAltDragging, dragPreviewPos]);
 
   useEffect(() => {
     renderCanvas();
@@ -145,7 +167,7 @@ export default function PixelCanvas() {
 
     if (currentTool === 'select') {
       if (e.button === 0) {
-        const started = startDragging(pos.x, pos.y);
+        const started = startDragging(pos.x, pos.y, e.altKey || e.metaKey);
         if (!started) {
           clearSelection();
           startSelection(pos.x, pos.y);
@@ -328,6 +350,28 @@ export default function PixelCanvas() {
   );
 }
 
+function drawDragPreview(
+  ctx: CanvasRenderingContext2D,
+  pixels: Uint8ClampedArray,
+  pos: { x: number; y: number },
+  width: number,
+  height: number,
+  zoom: number
+) {
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = width;
+  tempCanvas.height = height;
+  const tempCtx = tempCanvas.getContext('2d')!;
+  const imageData = tempCtx.createImageData(width, height);
+  imageData.data.set(pixels);
+  tempCtx.putImageData(imageData, 0, 0);
+
+  ctx.save();
+  ctx.globalAlpha = 0.7;
+  ctx.drawImage(tempCanvas, pos.x * zoom, pos.y * zoom, width * zoom, height * zoom);
+  ctx.restore();
+}
+
 function drawOnionSkinFrame(
   ctx: CanvasRenderingContext2D,
   pixels: Uint8ClampedArray,
@@ -396,17 +440,19 @@ function drawGrid(ctx: CanvasRenderingContext2D, canvasSize: number, zoom: numbe
 function drawSelectionOverlay(
   ctx: CanvasRenderingContext2D,
   selection: { x: number; y: number; width: number; height: number },
-  zoom: number
+  zoom: number,
+  fillColor = 'rgba(168, 85, 247, 0.15)',
+  strokeColor = '#a855f7'
 ) {
   const px = selection.x * zoom;
   const py = selection.y * zoom;
   const pw = selection.width * zoom;
   const ph = selection.height * zoom;
 
-  ctx.fillStyle = 'rgba(168, 85, 247, 0.15)';
+  ctx.fillStyle = fillColor;
   ctx.fillRect(px, py, pw, ph);
 
-  ctx.strokeStyle = '#a855f7';
+  ctx.strokeStyle = strokeColor;
   ctx.lineWidth = 2;
   ctx.setLineDash([4, 4]);
   ctx.strokeRect(px + 1, py + 1, pw - 2, ph - 2);
@@ -425,7 +471,7 @@ function drawSelectionOverlay(
   ];
 
   ctx.fillStyle = '#ffffff';
-  ctx.strokeStyle = '#a855f7';
+  ctx.strokeStyle = strokeColor;
   ctx.lineWidth = 1;
 
   handles.forEach(([hx, hy]) => {

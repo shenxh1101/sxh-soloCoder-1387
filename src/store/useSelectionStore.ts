@@ -87,19 +87,18 @@ interface SelectionStore extends SelectionState {
   updateCurrentFramePixels: (pixels: Uint8ClampedArray) => void;
   pushHistory: () => void;
   tempSelectionStart: { x: number; y: number } | null;
-  basePixelsAfterErase: Uint8ClampedArray | null;
-  nudgeSelection: (dx: number, dy: number) => void;
 }
 
 export const useSelectionStore = create<SelectionStore>((set, get) => ({
   selection: null,
   selectionPixels: null,
   isDraggingSelection: false,
+  isAltDragging: false,
   dragOffset: { x: 0, y: 0 },
+  dragPreviewPos: null,
   clipboardPixels: null,
   clipboardSize: null,
   tempSelectionStart: null,
-  basePixelsAfterErase: null,
   setCurrentFramePixels: () => {},
   getCurrentFramePixels: () => new Uint8ClampedArray(),
   updateCurrentFramePixels: () => {},
@@ -110,7 +109,7 @@ export const useSelectionStore = create<SelectionStore>((set, get) => ({
       tempSelectionStart: { x, y },
       selection: { x, y, width: 1, height: 1 },
       selectionPixels: null,
-      basePixelsAfterErase: null
+      dragPreviewPos: null
     });
   },
 
@@ -146,13 +145,14 @@ export const useSelectionStore = create<SelectionStore>((set, get) => ({
       selection: null,
       selectionPixels: null,
       isDraggingSelection: false,
+      isAltDragging: false,
       dragOffset: { x: 0, y: 0 },
-      basePixelsAfterErase: null
+      dragPreviewPos: null
     });
   },
 
-  startDragging: (x: number, y: number): boolean => {
-    const { selection, selectionPixels, getCurrentFramePixels } = get();
+  startDragging: (x: number, y: number, isAlt = false): boolean => {
+    const { selection, selectionPixels } = get();
     if (!selection || !selectionPixels) return false;
 
     if (
@@ -161,17 +161,14 @@ export const useSelectionStore = create<SelectionStore>((set, get) => ({
       y >= selection.y &&
       y < selection.y + selection.height
     ) {
-      const currentPixels = getCurrentFramePixels();
-      const erased = eraseSelection(currentPixels, selection);
-      get().updateCurrentFramePixels(erased);
-
       set({
         isDraggingSelection: true,
-        basePixelsAfterErase: erased,
+        isAltDragging: isAlt,
         dragOffset: {
           x: x - selection.x,
           y: y - selection.y
-        }
+        },
+        dragPreviewPos: { x: selection.x, y: selection.y }
       });
       return true;
     }
@@ -179,8 +176,8 @@ export const useSelectionStore = create<SelectionStore>((set, get) => ({
   },
 
   updateDragPosition: (x: number, y: number) => {
-    const { isDraggingSelection, selectionPixels, dragOffset, selection, basePixelsAfterErase, updateCurrentFramePixels } = get();
-    if (!isDraggingSelection || !selectionPixels || !selection || !basePixelsAfterErase) return;
+    const { isDraggingSelection, selection, dragOffset } = get();
+    if (!isDraggingSelection || !selection) return;
 
     const newX = x - dragOffset.x;
     const newY = y - dragOffset.y;
@@ -188,27 +185,77 @@ export const useSelectionStore = create<SelectionStore>((set, get) => ({
     const clampedX = Math.max(0, Math.min(CANVAS_SIZE - selection.width, newX));
     const clampedY = Math.max(0, Math.min(CANVAS_SIZE - selection.height, newY));
 
-    const pasted = pastePixels(basePixelsAfterErase, selectionPixels, clampedX, clampedY, selection.width, selection.height);
-    updateCurrentFramePixels(pasted);
-
     set({
-      selection: {
-        ...selection,
-        x: clampedX,
-        y: clampedY
-      }
+      dragPreviewPos: { x: clampedX, y: clampedY }
     });
   },
 
   finishDragging: () => {
-    const { isDraggingSelection } = get();
-    if (isDraggingSelection) {
-      get().pushHistory();
+    const {
+      isDraggingSelection,
+      isAltDragging,
+      selection,
+      selectionPixels,
+      dragPreviewPos,
+      getCurrentFramePixels,
+      updateCurrentFramePixels,
+      pushHistory
+    } = get();
+
+    if (!isDraggingSelection || !selection || !selectionPixels) {
+      set({
+        isDraggingSelection: false,
+        isAltDragging: false,
+        dragOffset: { x: 0, y: 0 },
+        dragPreviewPos: null
+      });
+      return;
     }
+
+    const targetPos = dragPreviewPos || { x: selection.x, y: selection.y };
+    const positionChanged = targetPos.x !== selection.x || targetPos.y !== selection.y;
+
+    if (positionChanged) {
+      const currentPixels = getCurrentFramePixels();
+      let newPixels = currentPixels;
+
+      if (isAltDragging) {
+        newPixels = pastePixels(currentPixels, selectionPixels, targetPos.x, targetPos.y, selection.width, selection.height);
+      } else {
+        const basePixels = eraseSelection(currentPixels, selection);
+        newPixels = pastePixels(basePixels, selectionPixels, targetPos.x, targetPos.y, selection.width, selection.height);
+      }
+
+      updateCurrentFramePixels(newPixels);
+
+      if (isAltDragging) {
+        const newSelectionPixels = extractSelectionPixels(newPixels, { ...selection, x: targetPos.x, y: targetPos.y });
+        set({
+          selection: {
+            ...selection,
+            x: targetPos.x,
+            y: targetPos.y
+          },
+          selectionPixels: newSelectionPixels
+        });
+      } else {
+        set({
+          selection: {
+            ...selection,
+            x: targetPos.x,
+            y: targetPos.y
+          }
+        });
+      }
+
+      pushHistory();
+    }
+
     set({
       isDraggingSelection: false,
+      isAltDragging: false,
       dragOffset: { x: 0, y: 0 },
-      basePixelsAfterErase: null
+      dragPreviewPos: null
     });
   },
 
@@ -216,14 +263,13 @@ export const useSelectionStore = create<SelectionStore>((set, get) => ({
     const { selection, selectionPixels, getCurrentFramePixels, updateCurrentFramePixels, pushHistory } = get();
     if (!selection || !selectionPixels) return;
 
-    const currentPixels = getCurrentFramePixels();
-    const basePixels = eraseSelection(currentPixels, selection);
-
     const newX = Math.max(0, Math.min(CANVAS_SIZE - selection.width, selection.x + dx));
     const newY = Math.max(0, Math.min(CANVAS_SIZE - selection.height, selection.y + dy));
 
     if (newX === selection.x && newY === selection.y) return;
 
+    const currentPixels = getCurrentFramePixels();
+    const basePixels = eraseSelection(currentPixels, selection);
     const pasted = pastePixels(basePixels, selectionPixels, newX, newY, selection.width, selection.height);
     updateCurrentFramePixels(pasted);
 

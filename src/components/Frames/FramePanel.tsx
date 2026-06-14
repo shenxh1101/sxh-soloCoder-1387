@@ -1,5 +1,5 @@
-import { useRef, useEffect, useState } from 'react';
-import { Plus, Trash2, Copy, ChevronLeft, ChevronRight, GripVertical, Play, Pause, Scissors, Clipboard, Clock, Film, Save } from 'lucide-react';
+import { useRef, useEffect, useState, useMemo } from 'react';
+import { Plus, Trash2, Copy, ChevronLeft, ChevronRight, GripVertical, Play, Pause, Scissors, Clipboard, Clock, Film, Save, Layers } from 'lucide-react';
 import { usePixelStore } from '@/store/usePixelStore';
 import { useClipStore } from '@/store/useClipStore';
 import { createFrameThumbnailDataUrl } from '@/utils/exportUtils';
@@ -27,6 +27,9 @@ export default function FramePanel() {
   const loopEndIndex = usePixelStore(state => state.loopEndIndex);
   const setLoopPreview = usePixelStore(state => state.setLoopPreview);
   const setIsLoopPreviewing = usePixelStore(state => state.setIsLoopPreviewing);
+  const clipInstances = usePixelStore(state => state.clipInstances);
+  const addClipInstance = usePixelStore(state => state.addClipInstance);
+  const moveClipInstance = usePixelStore(state => state.moveClipInstance);
 
   const createClipFromFrames = useClipStore(state => state.createClipFromFrames);
   const saveClip = useClipStore(state => state.saveClip);
@@ -81,9 +84,17 @@ export default function FramePanel() {
     }
   };
 
+  const getClipInstanceByFrameIndex = (idx: number) => {
+    return clipInstances.find(inst => idx >= inst.startIndex && idx < inst.startIndex + inst.frameCount);
+  };
+
   const handleDragStart = (e: React.DragEvent, index: number) => {
     setDragIndex(index);
     e.dataTransfer.effectAllowed = 'move';
+    const inst = getClipInstanceByFrameIndex(index);
+    if (inst) {
+      e.dataTransfer.setData('clipInstanceId', inst.id);
+    }
   };
 
   const handleDragOver = (e: React.DragEvent, index: number) => {
@@ -93,7 +104,12 @@ export default function FramePanel() {
 
   const handleDrop = (e: React.DragEvent, index: number) => {
     e.preventDefault();
-    if (dragIndex !== null && dragIndex !== index) {
+    const clipInstanceId = e.dataTransfer.getData('clipInstanceId');
+    if (clipInstanceId) {
+      if (dragIndex !== null && dragIndex !== index) {
+        moveClipInstance(clipInstanceId, index);
+      }
+    } else if (dragIndex !== null && dragIndex !== index) {
       moveFrame(dragIndex, index);
     }
     setDragIndex(null);
@@ -143,8 +159,58 @@ export default function FramePanel() {
     const selectedFrames: Frame[] = sortedIndices.map(i => frames[i]).filter(Boolean);
     const clip = createClipFromFrames(clipName.trim(), selectedFrames);
     saveClip(clip);
+
+    const startIdx = sortedIndices[0];
+    const count = sortedIndices.length;
+    addClipInstance(startIdx, count, clipName.trim());
+
     setShowSaveClipModal(false);
     setClipName('');
+  };
+
+  const clipInstanceColorMap = useMemo(() => {
+    const palette = [
+      'border-pixel-primary',
+      'border-pixel-accent',
+      'border-pink-500',
+      'border-blue-500',
+      'border-green-500',
+      'border-yellow-500',
+      'border-red-500',
+      'border-cyan-500'
+    ];
+    const map: Record<string, { border: string; bg: string; label: string }> = {};
+    clipInstances.forEach((inst, idx) => {
+      const color = palette[idx % palette.length];
+      const colorHex = [
+        'rgba(168,85,247,',
+        'rgba(4,200,147,',
+        'rgba(236,72,153,',
+        'rgba(59,130,246,',
+        'rgba(34,197,94,',
+        'rgba(234,179,8,',
+        'rgba(239,68,68,',
+        'rgba(6,182,212,'
+      ][idx % 8];
+      map[inst.id] = {
+        border: color,
+        bg: colorHex + '0.12)',
+        label: inst.name
+      };
+    });
+    return map;
+  }, [clipInstances]);
+
+  const canGroupSelected = useMemo(() => {
+    if (selectedFrameIndices.length < 2) return false;
+    const sorted = [...selectedFrameIndices].sort((a, b) => a - b);
+    return sorted.every((v, i) => i === 0 || v === sorted[i - 1] + 1);
+  }, [selectedFrameIndices]);
+
+  const handleGroupSelected = () => {
+    if (!canGroupSelected) return;
+    const sorted = [...selectedFrameIndices].sort((a, b) => a - b);
+    addClipInstance(sorted[0], sorted.length, `分组 ${clipInstances.length + 1}`);
   };
 
   useEffect(() => {
@@ -227,6 +293,16 @@ export default function FramePanel() {
               >
                 <Save size={14} />
               </button>
+              <button
+                onClick={handleGroupSelected}
+                disabled={!canGroupSelected}
+                className={"p-1.5 transition-colors " + (canGroupSelected
+                  ? 'hover:bg-pixel-surface-light text-pixel-text-muted hover:text-pixel-primary'
+                  : 'opacity-40 cursor-not-allowed text-pixel-text-muted')}
+                title={canGroupSelected ? '将选中的连续帧分组为片段实例' : '需要选择 2 帧以上的连续帧'}
+              >
+                <Layers size={14} />
+              </button>
               <div className="w-px h-5 bg-pixel-border mx-1" />
             </>
           )}
@@ -279,11 +355,15 @@ export default function FramePanel() {
           ref={scrollRef}
           className="flex items-center gap-2 overflow-x-auto overflow-y-hidden py-1 px-1"
         >
-          {frames.map((frame, index) => (
+          {frames.map((frame, index) => {
+            const inst = getClipInstanceByFrameIndex(index);
+            return (
             <FrameThumbnail
               key={frame.id}
               frame={frame}
               index={index}
+              clipInstanceId={inst?.id}
+              clipInstanceStyle={inst ? clipInstanceColorMap[inst.id] : undefined}
               isActive={index === currentFrameIndex}
               isSelected={selectedFrameIndices.includes(index)}
               isInLoopRange={isLoopPreviewing && index >= loopStartIndex && index <= loopEndIndex}
@@ -298,7 +378,7 @@ export default function FramePanel() {
               onDrop={(e) => handleDrop(e, index)}
               onDragEnd={handleDragEnd}
             />
-          ))}
+          );})}
 
           <button
             onClick={() => addFrame()}
@@ -359,8 +439,10 @@ export default function FramePanel() {
 }
 
 interface FrameThumbnailProps {
-  frame: { id: string; pixels: Uint8ClampedArray; delay: number };
+  frame: { id: string; pixels: Uint8ClampedArray; delay: number; clipInstanceId?: string };
   index: number;
+  clipInstanceId?: string;
+  clipInstanceStyle?: { border: string; bg: string; label: string };
   isActive: boolean;
   isSelected: boolean;
   isInLoopRange: boolean;
@@ -379,6 +461,8 @@ interface FrameThumbnailProps {
 function FrameThumbnail({
   frame,
   index,
+  clipInstanceId,
+  clipInstanceStyle,
   isActive,
   isSelected,
   isInLoopRange,
@@ -401,17 +485,31 @@ function FrameThumbnail({
     setThumbnailUrl(url);
   }, [frame]);
 
+  const baseBorder = clipInstanceStyle
+    ? 'border-2 ' + clipInstanceStyle.border
+    : 'border-2 border-pixel-border';
+  const ringClass = isSelected
+    ? 'ring-2 ring-pixel-accent'
+    : isActive
+      ? 'ring-2 ring-pixel-primary'
+      : '';
+  const bgStyle = clipInstanceStyle && !isSelected
+    ? { backgroundColor: clipInstanceStyle.bg }
+    : undefined;
+
   return (
     <div
-      className={`
-        frame-thumbnail relative flex-shrink-0
-        ${isSelected ? 'ring-2 ring-pixel-accent' : isActive ? 'ring-2 ring-pixel-primary' : 'border-2 border-pixel-border'}
-        ${isInLoopRange ? 'ring-2 ring-pixel-primary ring-offset-1 ring-offset-pixel-bg' : ''}
-        ${isDragging ? 'opacity-50' : ''}
-        ${isDragOver ? 'ring-2 ring-pixel-accent' : ''}
-        ${isSelected ? 'bg-pixel-accent/10' : ''}
-        group cursor-pointer
-      `}
+      className={
+        'frame-thumbnail relative flex-shrink-0 ' +
+        baseBorder + ' ' +
+        (isInLoopRange ? 'ring-2 ring-pixel-primary ring-offset-1 ring-offset-pixel-bg ' : '') +
+        (isDragging ? 'opacity-50 ' : '') +
+        (isDragOver ? 'ring-2 ring-pixel-accent ' : '') +
+        ringClass + ' ' +
+        (isSelected ? 'bg-pixel-accent/10 ' : '') +
+        'group cursor-pointer'
+      }
+      style={bgStyle}
       draggable
       onClick={onClick}
       onDragStart={onDragStart}

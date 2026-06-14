@@ -4,12 +4,22 @@ export interface Frame {
   id: string;
   pixels: Uint8ClampedArray;
   delay: number;
+  clipInstanceId?: string;
+}
+
+export interface ClipInstance {
+  id: string;
+  clipId: string;
+  name: string;
+  startIndex: number;
+  frameCount: number;
 }
 
 export interface SerializedFrame {
   id: string;
   pixels: number[];
   delay: number;
+  clipInstanceId?: string;
 }
 
 export interface PixelAnimation {
@@ -48,7 +58,9 @@ export interface SelectionState {
   selection: Selection | null;
   selectionPixels: Uint8ClampedArray | null;
   isDraggingSelection: boolean;
+  isAltDragging: boolean;
   dragOffset: { x: number; y: number };
+  dragPreviewPos: { x: number; y: number } | null;
   clipboardPixels: Uint8ClampedArray | null;
   clipboardSize: { width: number; height: number } | null;
 
@@ -57,7 +69,7 @@ export interface SelectionState {
   finishSelection: () => void;
   clearSelection: () => void;
 
-  startDragging: (x: number, y: number) => boolean;
+  startDragging: (x: number, y: number, isAlt?: boolean) => boolean;
   updateDragPosition: (x: number, y: number) => void;
   finishDragging: () => void;
 
@@ -105,4 +117,5 @@ export interface DraftEntry {
   savedAt: string;
   frameCount: number;
   data: string;
+  thumbnail?: string;
 }

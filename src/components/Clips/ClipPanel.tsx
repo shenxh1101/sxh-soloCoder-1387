@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Film, Trash2, Copy, Edit3, Check, X, Plus } from 'lucide-react';
+import { Film, Trash2, Copy, Edit3, Check, X, Plus, Layers } from 'lucide-react';
 import { useClipStore } from '@/store/useClipStore';
 import { usePixelStore } from '@/store/usePixelStore';
 import type { Frame } from '@/types';
@@ -13,6 +13,15 @@ export default function ClipPanel() {
 
   const insertFramesAt = usePixelStore(state => state.insertFramesAt);
   const currentFrameIndex = usePixelStore(state => state.currentFrameIndex);
+  const addClipInstance = usePixelStore(state => state.addClipInstance);
+  const duplicateClipInstance = usePixelStore(state => state.duplicateClipInstance);
+  const removeClipInstance = usePixelStore(state => state.removeClipInstance);
+  const moveClipInstance = usePixelStore(state => state.moveClipInstance);
+  const toggleClipInstanceSelection = usePixelStore(state => state.toggleClipInstanceSelection);
+  const selectFramesByClipInstances = usePixelStore(state => state.selectFramesByClipInstances);
+  const clipInstances = usePixelStore(state => state.clipInstances);
+  const selectedClipInstanceIds = usePixelStore(state => state.selectedClipInstanceIds);
+  const frames = usePixelStore(state => state.frames);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
@@ -25,13 +34,15 @@ export default function ClipPanel() {
     const clip = clips.find(c => c.id === clipId);
     if (!clip) return;
 
-    const frames: Frame[] = clip.frames.map(f => ({
+    const framesArr: Frame[] = clip.frames.map(f => ({
       id: f.id,
       pixels: new Uint8ClampedArray(f.pixels),
       delay: f.delay
     }));
 
-    insertFramesAt(frames, currentFrameIndex + 1);
+    const insertIdx = currentFrameIndex + 1;
+    insertFramesAt(framesArr, insertIdx);
+    addClipInstance(insertIdx, clip.frames.length, clip.name, clip.id);
   };
 
   const handleStartRename = (id: string, currentName: string) => {
@@ -54,14 +65,96 @@ export default function ClipPanel() {
 
   return (
     <div className="panel p-3">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-xs font-bold text-pixel-text font-mono flex items-center gap-1.5">
-          <Film size={14} className="text-pixel-primary" />
-          片段库
-        </h3>
-        <span className="text-[10px] text-pixel-text-muted font-mono">
-          {clips.length} 个
-        </span>
+      <h3 className="text-xs font-bold text-pixel-text mb-3 font-mono flex items-center gap-1.5">
+        <Film size={14} className="text-pixel-primary" />
+        片段库 / 时间轴实例
+      </h3>
+
+      {clipInstances.length > 0 && (
+        <div className="mb-3 pb-3 border-b border-pixel-border">
+          <div className="flex items-center justify-between mb-2">
+            <h4 className="text-[10px] font-bold text-pixel-text-muted font-mono flex items-center gap-1">
+              <Layers size={11} />
+              时间轴实例 ({clipInstances.length})
+            </h4>
+            {selectedClipInstanceIds.length > 0 && (
+              <button
+                onClick={selectFramesByClipInstances}
+                className="text-[10px] font-mono bg-pixel-primary/10 text-pixel-primary px-1.5 py-0.5 hover:bg-pixel-primary/20 transition-colors"
+              >
+                选中帧
+              </button>
+            )}
+          </div>
+          <div className="space-y-1.5 max-h-[140px] overflow-y-auto">
+            {clipInstances.map(inst => {
+              const isSel = selectedClipInstanceIds.includes(inst.id);
+              return (
+                <div
+                  key={inst.id}
+                  className={`
+                    border-2 p-1.5 text-[10px] font-mono cursor-pointer transition-all
+                    ${isSel ? 'border-pixel-primary bg-pixel-primary/10' : 'border-pixel-border bg-pixel-surface-light hover:border-pixel-primary/50'}
+                  `}
+                  onClick={() => toggleClipInstanceSelection(inst.id)}
+                >
+                  <div className="flex items-center justify-between mb-0.5">
+                    <span className="text-pixel-text truncate flex-1">{inst.name}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-pixel-text-muted">
+                    <span>帧 {inst.startIndex + 1}-{inst.startIndex + inst.frameCount}</span>
+                    <span>{inst.frameCount}帧</span>
+                  </div>
+                  <div className="flex gap-1 mt-1.5">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); duplicateClipInstance(inst.id); }}
+                      className="flex-1 py-0.5 bg-pixel-bg text-pixel-primary border border-pixel-primary/30 hover:bg-pixel-primary/10 transition-colors"
+                      title="复制实例"
+                    >
+                      复制
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const newStart = Math.max(0, inst.startIndex - 1);
+                        moveClipInstance(inst.id, newStart);
+                      }}
+                      className="px-1 py-0.5 bg-pixel-bg text-pixel-text-muted border border-pixel-border hover:text-pixel-text transition-colors"
+                      title="前移"
+                    >
+                      ←
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const newStart = Math.min(frames.length - inst.frameCount, inst.startIndex + 1);
+                        moveClipInstance(inst.id, newStart);
+                      }}
+                      className="px-1 py-0.5 bg-pixel-bg text-pixel-text-muted border border-pixel-border hover:text-pixel-text transition-colors"
+                      title="后移"
+                    >
+                      →
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); removeClipInstance(inst.id); }}
+                      className="px-1 py-0.5 bg-pixel-bg text-pixel-text-muted border border-pixel-border hover:text-pixel-danger transition-colors"
+                      title="解除分组"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between mb-2">
+        <h4 className="text-[10px] font-bold text-pixel-text-muted font-mono flex items-center gap-1">
+          <Film size={11} />
+          保存的片段 ({clips.length})
+        </h4>
       </div>
 
       {clips.length === 0 ? (
@@ -71,7 +164,7 @@ export default function ClipPanel() {
           <p className="text-[10px] font-mono mt-1">选中帧后点击保存按钮</p>
         </div>
       ) : (
-        <div className="space-y-2 max-h-[300px] overflow-y-auto">
+        <div className="space-y-2 max-h-[200px] overflow-y-auto">
           {clips.map(clip => (
             <div
               key={clip.id}

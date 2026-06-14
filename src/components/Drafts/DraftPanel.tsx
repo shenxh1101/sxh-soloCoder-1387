@@ -1,6 +1,47 @@
 import { useState, useEffect } from 'react';
-import { Save, FolderOpen, Trash2, FileJson } from 'lucide-react';
+import { Save, FolderOpen, Trash2, FileJson, GitCompare, X } from 'lucide-react';
 import { usePixelStore } from '@/store/usePixelStore';
+import type { Frame } from '@/types';
+
+const CANVAS_SIZE = 32;
+
+function generateThumbnail(frames: Frame[]): string | undefined {
+  try {
+    if (frames.length === 0) return undefined;
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+
+    const frame = frames[0];
+    const imgData = ctx.createImageData(CANVAS_SIZE, CANVAS_SIZE);
+    imgData.data.set(frame.pixels);
+    const tmp = document.createElement('canvas');
+    tmp.width = CANVAS_SIZE;
+    tmp.height = CANVAS_SIZE;
+    tmp.getContext('2d')!.putImageData(imgData, 0, 0);
+    ctx.drawImage(tmp, 0, 0, 64, 64);
+
+    return canvas.toDataURL('image/png');
+  } catch (e) {
+    return undefined;
+  }
+}
+
+function parseFramesFromData(data: string): Frame[] | null {
+  try {
+    const parsed = JSON.parse(data);
+    if (!parsed.frames || !Array.isArray(parsed.frames)) return null;
+    return parsed.frames.map((f: { id: string; pixels: number[]; delay: number }) => ({
+      id: f.id,
+      pixels: new Uint8ClampedArray(f.pixels),
+      delay: f.delay
+    }));
+  } catch {
+    return null;
+  }
+}
 
 export default function DraftPanel() {
   const drafts = usePixelStore(state => state.drafts);
@@ -9,9 +50,11 @@ export default function DraftPanel() {
   const deleteDraft = usePixelStore(state => state.deleteDraft);
   const loadDrafts = usePixelStore(state => state.loadDrafts);
   const exportProject = usePixelStore(state => state.exportProject);
+  const frames = usePixelStore(state => state.frames);
 
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [draftName, setDraftName] = useState('');
+  const [compareDraft, setCompareDraft] = useState<{ name: string; thumb: string | undefined; otherThumb: string | undefined } | null>(null);
 
   useEffect(() => {
     loadDrafts();
@@ -37,6 +80,24 @@ export default function DraftPanel() {
     a.download = `pixel-animation-${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleCompare = (draftId: string) => {
+    const draft = drafts.find(d => d.id === draftId);
+    if (!draft) return;
+    const currentThumb = generateThumbnail(frames);
+    let otherThumb = draft.thumbnail;
+    if (!otherThumb) {
+      const parsed = parseFramesFromData(draft.data);
+      if (parsed) {
+        otherThumb = generateThumbnail(parsed);
+      }
+    }
+    setCompareDraft({
+      name: draft.name,
+      thumb: currentThumb,
+      otherThumb
+    });
   };
 
   const formatDate = (isoString: string) => {
@@ -89,26 +150,52 @@ export default function DraftPanel() {
                 key={draft.id}
                 className="border-2 border-pixel-border bg-pixel-surface-light p-2 hover:border-pixel-primary/50 transition-colors group"
               >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[11px] font-mono text-pixel-text truncate flex-1">
-                    {draft.name}
-                  </span>
-                  {idx === 0 && (
-                    <span className="text-[9px] font-mono text-pixel-accent bg-pixel-accent/20 px-1 py-0.5 ml-1">
-                      最新
-                    </span>
+                <div className="flex gap-2">
+                  {draft.thumbnail ? (
+                    <div className="flex-shrink-0 w-10 h-10 border border-pixel-border checkerboard overflow-hidden">
+                      <img
+                        src={draft.thumbnail}
+                        alt={draft.name}
+                        className="w-full h-full pixelated object-contain"
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex-shrink-0 w-10 h-10 border border-pixel-border bg-pixel-bg flex items-center justify-center text-pixel-text-muted">
+                      <FileJson size={14} />
+                    </div>
                   )}
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1 mb-0.5">
+                      <span className="text-[11px] font-mono text-pixel-text truncate">
+                        {draft.name}
+                      </span>
+                      {idx === 0 && (
+                        <span className="text-[9px] font-mono text-pixel-accent bg-pixel-accent/20 px-1 py-0.5 flex-shrink-0">
+                          最新
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] font-mono text-pixel-text-muted">
+                      <span>{draft.frameCount} 帧</span>
+                      <span>{formatDate(draft.savedAt)}</span>
+                    </div>
+                  </div>
                 </div>
-                <div className="flex items-center justify-between text-[10px] font-mono text-pixel-text-muted mb-2">
-                  <span>{draft.frameCount} 帧</span>
-                  <span>{formatDate(draft.savedAt)}</span>
-                </div>
-                <div className="flex gap-1">
+
+                <div className="flex gap-1 mt-2">
                   <button
                     onClick={() => loadDraft(draft.id)}
                     className="flex-1 py-1 bg-pixel-primary/10 hover:bg-pixel-primary/20 text-pixel-primary text-[10px] font-mono border border-pixel-primary/30 transition-colors"
                   >
                     恢复
+                  </button>
+                  <button
+                    onClick={() => handleCompare(draft.id)}
+                    className="py-1 px-2 text-pixel-text-muted hover:text-pixel-text hover:bg-pixel-surface text-[10px] font-mono border border-pixel-border transition-colors"
+                    title="对比当前版本"
+                  >
+                    <GitCompare size={11} />
                   </button>
                   <button
                     onClick={() => deleteDraft(draft.id)}
@@ -157,6 +244,53 @@ export default function DraftPanel() {
                 取消
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {compareDraft && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-pixel-surface border-4 border-pixel-primary p-5 w-[420px]">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-pixel-text font-mono flex items-center gap-2">
+                <GitCompare size={18} className="text-pixel-primary" />
+                版本对比
+              </h3>
+              <button
+                onClick={() => setCompareDraft(null)}
+                className="p-1 text-pixel-text-muted hover:text-pixel-text transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex gap-4 justify-center">
+              <div className="text-center">
+                <div className="w-28 h-28 border-2 border-pixel-border checkerboard p-1 mb-2">
+                  {compareDraft.thumb ? (
+                    <img src={compareDraft.thumb} alt="当前" className="w-full h-full pixelated object-contain" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-pixel-text-muted text-xs font-mono">无</div>
+                  )}
+                </div>
+                <div className="text-xs font-mono text-pixel-text">当前版本</div>
+              </div>
+              <div className="flex items-center text-pixel-primary text-2xl">
+                vs
+              </div>
+              <div className="text-center">
+                <div className="w-28 h-28 border-2 border-pixel-primary checkerboard p-1 mb-2">
+                  {compareDraft.otherThumb ? (
+                    <img src={compareDraft.otherThumb} alt="旧版本" className="w-full h-full pixelated object-contain" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-pixel-text-muted text-xs font-mono">无</div>
+                  )}
+                </div>
+                <div className="text-xs font-mono text-pixel-primary truncate max-w-[112px]">{compareDraft.name}</div>
+              </div>
+            </div>
+            <p className="text-[10px] text-pixel-text-muted font-mono text-center mt-4">
+              通过第一帧缩略图快速辨别两个版本的差异
+            </p>
           </div>
         </div>
       )}
