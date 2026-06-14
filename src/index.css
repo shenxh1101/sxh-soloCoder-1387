@@ -1,0 +1,138 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Press+Start+2P&family=VT323&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'JetBrains Mono', monospace;
+  line-height: 1.5;
+  font-weight: 400;
+  color: #e2e8f0;
+  background-color: #1a1b2e;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+#root {
+  height: 100vh;
+  width: 100vw;
+}
+
+/* 像素化渲染，确保画布清晰 */
+.pixelated {
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+}
+
+/* 棋盘格透明背景 */
+.checkerboard {
+  background-image:
+    linear-gradient(45deg, #3d3f66 25%, transparent 25%),
+    linear-gradient(-45deg, #3d3f66 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #3d3f66 75%),
+    linear-gradient(-45deg, transparent 75%, #3d3f66 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+  background-color: #252640;
+}
+
+/* 自定义滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #252640;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3d3f66;
+  border-radius: 0;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a855f7;
+}
+
+/* 像素风格按钮 */
+.btn-pixel {
+  @apply px-3 py-2 bg-pixel-surface text-pixel-text border-2 border-pixel-border;
+  @apply hover:bg-pixel-surface-light hover:border-pixel-primary;
+  @apply active:translate-y-0.5 active:shadow-pixel-inset;
+  @apply transition-all duration-100;
+  @apply cursor-pointer select-none;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.btn-pixel-primary {
+  @apply px-3 py-2 bg-pixel-primary text-white border-2 border-pixel-primary;
+  @apply hover:bg-pixel-primary-hover hover:border-pixel-primary-hover;
+  @apply active:translate-y-0.5 active:shadow-pixel-inset;
+  @apply transition-all duration-100;
+  @apply cursor-pointer select-none;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.btn-pixel-danger {
+  @apply px-3 py-2 bg-pixel-danger text-white border-2 border-pixel-danger;
+  @apply hover:brightness-110;
+  @apply active:translate-y-0.5 active:shadow-pixel-inset;
+  @apply transition-all duration-100;
+  @apply cursor-pointer select-none;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* 面板样式 */
+.panel {
+  @apply bg-pixel-surface border-2 border-pixel-border;
+  box-shadow: 4px 4px 0 0 rgba(0, 0, 0, 0.3);
+}
+
+/* 工具按钮激活状态 */
+.tool-active {
+  @apply bg-pixel-primary text-white border-pixel-primary;
+}
+
+/* 范围滑块样式 */
+input[type="range"] {
+  @apply w-full h-2 bg-pixel-surface-light rounded-none appearance-none cursor-pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  @apply appearance-none w-4 h-4 bg-pixel-primary border-2 border-pixel-primary;
+  @apply cursor-pointer;
+}
+
+input[type="range"]::-moz-range-thumb {
+  @apply w-4 h-4 bg-pixel-primary border-2 border-pixel-primary rounded-none;
+  @apply cursor-pointer;
+}
+
+/* 颜色选择器样式 */
+input[type="color"] {
+  @apply w-full h-10 cursor-pointer border-2 border-pixel-border bg-transparent;
+}
+
+input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+
+input[type="color"]::-webkit-color-swatch {
+  border: none;
+}
