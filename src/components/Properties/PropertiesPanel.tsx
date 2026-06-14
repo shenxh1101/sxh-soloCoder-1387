@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { useToolStore } from '@/store/useToolStore';
 import { useCanvasStore } from '@/store/useCanvasStore';
-import { ArrowLeftRight, Palette, Brush, Layers, Keyboard, Film, FileJson } from 'lucide-react';
+import { ArrowLeftRight, Palette, Brush, Layers, Keyboard, Film, FileJson, Flag } from 'lucide-react';
 import ClipPanel from '@/components/Clips/ClipPanel';
 import DraftPanel from '@/components/Drafts/DraftPanel';
+import MarkerPanel from '@/components/Markers/MarkerPanel';
 
-type TabType = 'color' | 'brush' | 'onion' | 'clips' | 'drafts' | 'shortcuts';
+type TabType = 'color' | 'brush' | 'onion' | 'clips' | 'drafts' | 'markers' | 'shortcuts';
 
 export default function PropertiesPanel() {
   const primaryColor = useToolStore(state => state.primaryColor);
@@ -33,6 +34,7 @@ export default function PropertiesPanel() {
   { id: 'onion', icon: <Layers size={14} />, label: '洋葱皮' },
   { id: 'clips', icon: <Film size={14} />, label: '片段' },
   { id: 'drafts', icon: <FileJson size={14} />, label: '版本' },
+  { id: 'markers', icon: <Flag size={14} />, label: '标记' },
   { id: 'shortcuts', icon: <Keyboard size={14} />, label: '快捷键' }
 ];
 
@@ -249,6 +251,8 @@ export default function PropertiesPanel() {
         {activeTab === 'clips' && <ClipPanel />}
 
         {activeTab === 'drafts' && <DraftPanel />}
+
+        {activeTab === 'markers' && <MarkerPanel />}
 
         {activeTab === 'shortcuts' && (
           <div className="p-3">

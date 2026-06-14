@@ -50,14 +50,18 @@ export function exportFramesAsJSON(
   height: number = CANVAS_SIZE
 ): void {
   const animation: PixelAnimation = {
-    version: '1.0',
+    version: '2.0',
     width,
     height,
     frames: frames.map(f => ({
       id: f.id,
       pixels: Array.from(f.pixels),
-      delay: f.delay
+      delay: f.delay,
+      clipInstanceId: f.clipInstanceId
     })),
+    clipInstances: [],
+    markers: [],
+    selectedClipInstanceIds: [],
     createdAt: Date.now(),
     updatedAt: Date.now()
   };
@@ -94,17 +98,26 @@ export function importFramesFromJSON(file: File): Promise<Frame[]> {
 export function saveProject(
   frames: Frame[],
   width: number = CANVAS_SIZE,
-  height: number = CANVAS_SIZE
+  height: number = CANVAS_SIZE,
+  extra?: {
+    clipInstances?: PixelAnimation['clipInstances'];
+    markers?: PixelAnimation['markers'];
+    selectedClipInstanceIds?: PixelAnimation['selectedClipInstanceIds'];
+  }
 ): void {
   const animation: PixelAnimation = {
-    version: '1.0',
+    version: '2.0',
     width,
     height,
     frames: frames.map(f => ({
       id: f.id,
       pixels: Array.from(f.pixels),
-      delay: f.delay
+      delay: f.delay,
+      clipInstanceId: f.clipInstanceId
     })),
+    clipInstances: extra?.clipInstances || [],
+    markers: extra?.markers || [],
+    selectedClipInstanceIds: extra?.selectedClipInstanceIds || [],
     createdAt: Date.now(),
     updatedAt: Date.now()
   };

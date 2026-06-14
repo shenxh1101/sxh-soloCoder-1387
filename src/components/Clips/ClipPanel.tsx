@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Film, Trash2, Copy, Edit3, Check, X, Plus, Layers } from 'lucide-react';
+import { Film, Trash2, Copy, Edit3, Check, X, Plus, Layers, Gauge, Scissors, Palette } from 'lucide-react';
 import { useClipStore } from '@/store/useClipStore';
 import { usePixelStore } from '@/store/usePixelStore';
 import type { Frame } from '@/types';
@@ -19,6 +19,9 @@ export default function ClipPanel() {
   const moveClipInstance = usePixelStore(state => state.moveClipInstance);
   const toggleClipInstanceSelection = usePixelStore(state => state.toggleClipInstanceSelection);
   const selectFramesByClipInstances = usePixelStore(state => state.selectFramesByClipInstances);
+  const updateClipInstance = usePixelStore(state => state.updateClipInstance);
+  const trimClipInstanceStart = usePixelStore(state => state.trimClipInstanceStart);
+  const trimClipInstanceEnd = usePixelStore(state => state.trimClipInstanceEnd);
   const clipInstances = usePixelStore(state => state.clipInstances);
   const selectedClipInstanceIds = usePixelStore(state => state.selectedClipInstanceIds);
   const frames = usePixelStore(state => state.frames);
@@ -93,9 +96,10 @@ export default function ClipPanel() {
                 <div
                   key={inst.id}
                   className={`
-                    border-2 p-1.5 text-[10px] font-mono cursor-pointer transition-all
+                    group border-2 p-1.5 text-[10px] font-mono cursor-pointer transition-all
                     ${isSel ? 'border-pixel-primary bg-pixel-primary/10' : 'border-pixel-border bg-pixel-surface-light hover:border-pixel-primary/50'}
                   `}
+                  style={inst.colorTag ? { borderColor: inst.colorTag } : undefined}
                   onClick={() => toggleClipInstanceSelection(inst.id)}
                 >
                   <div className="flex items-center justify-between mb-0.5">
@@ -142,6 +146,75 @@ export default function ClipPanel() {
                     >
                       ×
                     </button>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 mt-1.5 pt-1.5 border-t border-pixel-border/50">
+                    <Gauge size={10} className="text-pixel-text-muted" />
+                    <input
+                      type="range"
+                      min="0.25"
+                      max="4"
+                      step="0.25"
+                      value={inst.speedRatio}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        updateClipInstance(inst.id, { speedRatio: parseFloat(e.target.value) });
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="flex-1 h-1 bg-pixel-border"
+                    />
+                    <span className="text-[9px] font-mono text-pixel-text-muted w-8 text-right">
+                      {inst.speedRatio.toFixed(2)}×
+                    </span>
+                  </div>
+
+                  <div className="flex gap-1 mt-1">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        trimClipInstanceStart(inst.id, 1);
+                      }}
+                      disabled={inst.frameCount <= 1 || inst.trimStart >= inst.frameCount - 1}
+                      className="flex-1 py-0.5 bg-pixel-bg text-pixel-danger border border-pixel-danger/30 hover:bg-pixel-danger/10 transition-colors text-[9px] font-mono disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-0.5"
+                      title="裁切开头 1 帧"
+                    >
+                      <Scissors size={9} />
+                      裁头
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        trimClipInstanceEnd(inst.id, 1);
+                      }}
+                      disabled={inst.frameCount <= 1 || inst.trimEnd >= inst.frameCount - 1}
+                      className="flex-1 py-0.5 bg-pixel-bg text-pixel-danger border border-pixel-danger/30 hover:bg-pixel-danger/10 transition-colors text-[9px] font-mono disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-0.5"
+                      title="裁切结尾 1 帧"
+                    >
+                      <Scissors size={9} />
+                      裁尾
+                    </button>
+                    <div className="relative">
+                      <button
+                        onClick={(e) => e.stopPropagation()}
+                        className="px-1 py-0.5 bg-pixel-bg border border-pixel-border flex items-center justify-center"
+                        title="颜色标签"
+                      >
+                        <Palette size={10} className="text-pixel-text-muted" />
+                      </button>
+                      <div className="absolute top-full right-0 mt-1 bg-pixel-surface border border-pixel-border p-1 flex gap-0.5 z-30 hidden group-hover:flex">
+                        {['#a855f7', '#04c893', '#ec4899', '#3b82f6', '#22c55e', '#eab308', '#ef4444', '#06b6d4'].map((c) => (
+                          <button
+                            key={c}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              updateClipInstance(inst.id, { colorTag: c });
+                            }}
+                            className="w-4 h-4 rounded-sm border border-white/20"
+                            style={{ backgroundColor: c }}
+                          />
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
               );

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Frame, DraftEntry, ClipInstance } from '@/types';
+import type { Frame, DraftEntry, ClipInstance, TimelineMarker } from '@/types';
 import { createEmptyPixels, copyPixels } from '@/utils/colorUtils';
 import { createFrameThumbnailDataUrl } from '@/utils/exportUtils';
 
@@ -41,6 +41,7 @@ interface PixelState {
   drafts: DraftEntry[];
   clipInstances: ClipInstance[];
   selectedClipInstanceIds: string[];
+  markers: TimelineMarker[];
 
   setCurrentFrameIndex: (index: number) => void;
   getCurrentFrame: () => Frame | undefined;
@@ -62,6 +63,8 @@ interface PixelState {
   pasteFrames: (atIndex: number) => void;
 
   setLoopPreview: (start: number, end: number) => void;
+  setLoopPreviewByClipInstances: () => void;
+  getEffectivePlaySequence: () => number[];
   setIsLoopPreviewing: (value: boolean) => void;
   setIsPingPong: (value: boolean) => void;
   setMaxLoopCount: (n: number) => void;
@@ -74,6 +77,14 @@ interface PixelState {
   duplicateClipInstance: (instanceId: string, newStartIdx?: number) => void;
   toggleClipInstanceSelection: (instanceId: string) => void;
   selectFramesByClipInstances: () => void;
+  updateClipInstance: (instanceId: string, updates: Partial<ClipInstance>) => void;
+  trimClipInstanceStart: (instanceId: string, framesToTrim: number) => void;
+  trimClipInstanceEnd: (instanceId: string, framesToTrim: number) => void;
+
+  addMarker: (frameIndex: number, label: string, color: string, note?: string) => void;
+  updateMarker: (markerId: string, updates: Partial<TimelineMarker>) => void;
+  deleteMarker: (markerId: string) => void;
+  getMarkersByFrame: (frameIndex: number) => TimelineMarker[];
 
   updateCurrentFramePixels: (pixels: Uint8ClampedArray) => void;
 
@@ -118,7 +129,8 @@ export const usePixelStore = create<PixelState>((set, get) => {
     currentLoopCount: 0,
     drafts: [] as DraftEntry[],
     clipInstances: [] as ClipInstance[],
-    selectedClipInstanceIds: [] as string[]
+    selectedClipInstanceIds: [] as string[],
+    markers: [] as TimelineMarker[]
   };
 
   return {
@@ -414,13 +426,18 @@ export const usePixelStore = create<PixelState>((set, get) => {
         const parsed = JSON.parse(data);
         if (!parsed.frames || !Array.isArray(parsed.frames)) return;
         
-        const frames: Frame[] = parsed.frames.map((f: { id: string; pixels: number[]; delay: number }) => ({
+        const frames: Frame[] = parsed.frames.map((f: { id: string; pixels: number[]; delay: number; clipInstanceId?: string }) => ({
           id: f.id || generateId(),
           pixels: new Uint8ClampedArray(f.pixels),
-          delay: f.delay || DEFAULT_DELAY
+          delay: f.delay || DEFAULT_DELAY,
+          clipInstanceId: f.clipInstanceId
         }));
         
         if (frames.length === 0) return;
+
+        const clipInstances: ClipInstance[] = Array.isArray(parsed.clipInstances) ? parsed.clipInstances : [];
+        const markers: TimelineMarker[] = Array.isArray(parsed.markers) ? parsed.markers : [];
+        const selectedClipInstanceIds: string[] = Array.isArray(parsed.selectedClipInstanceIds) ? parsed.selectedClipInstanceIds : [];
         
         set({
           frames,
@@ -428,7 +445,10 @@ export const usePixelStore = create<PixelState>((set, get) => {
           history: [],
           historyIndex: -1,
           selectedFrameIndices: [],
-          isLoopPreviewing: false
+          isLoopPreviewing: false,
+          clipInstances,
+          markers,
+          selectedClipInstanceIds
         });
         get().pushHistory();
       } catch (e) {
@@ -486,7 +506,10 @@ export const usePixelStore = create<PixelState>((set, get) => {
         clipId: clipId || '',
         name,
         startIndex: startIdx,
-        frameCount: count
+        frameCount: count,
+        trimStart: 0,
+        trimEnd: 0,
+        speedRatio: 1.0
       };
 
       const newFrames = [...frames];
@@ -592,7 +615,11 @@ export const usePixelStore = create<PixelState>((set, get) => {
         clipId: inst.clipId,
         name: inst.name + ' (副本)',
         startIndex: insertAt,
-        frameCount: inst.frameCount
+        frameCount: inst.frameCount,
+        trimStart: inst.trimStart,
+        trimEnd: inst.trimEnd,
+        speedRatio: inst.speedRatio,
+        colorTag: inst.colorTag
       };
 
       const adjustedInstances = clipInstances.map(other => {
@@ -634,16 +661,184 @@ export const usePixelStore = create<PixelState>((set, get) => {
       set({ selectedFrameIndices: indices });
     },
 
+    updateClipInstance: (instanceId: string, updates: Partial<ClipInstance>) => {
+      const { clipInstances } = get();
+      set({
+        clipInstances: clipInstances.map(inst =>
+          inst.id === instanceId ? { ...inst, ...updates } : inst
+        )
+      });
+    },
+
+    trimClipInstanceStart: (instanceId: string, framesToTrim: number) => {
+      const { frames, clipInstances, markers } = get();
+      const inst = clipInstances.find(i => i.id === instanceId);
+      if (!inst) return;
+      const maxTrim = inst.frameCount - 1;
+      const trim = Math.max(0, Math.min(framesToTrim, maxTrim));
+      if (trim === 0) return;
+
+      const newFrames = [...frames];
+      const deleteFrom = inst.startIndex;
+      const deleteTo = inst.startIndex + trim;
+      newFrames.splice(deleteFrom, deleteTo - deleteFrom);
+
+      const newInstances = clipInstances.map(other => {
+        if (other.id === instanceId) {
+          return {
+            ...other,
+            startIndex: other.startIndex,
+            frameCount: other.frameCount - trim
+          };
+        }
+        if (other.startIndex >= deleteTo) {
+          return { ...other, startIndex: other.startIndex - trim };
+        }
+        return other;
+      });
+
+      const newMarkers = markers.map(m => {
+        if (m.frameIndex >= deleteTo) {
+          return { ...m, frameIndex: m.frameIndex - trim };
+        }
+        if (m.frameIndex >= deleteFrom && m.frameIndex < deleteTo) {
+          return { ...m, frameIndex: deleteFrom };
+        }
+        return m;
+      });
+
+      set({ frames: newFrames, clipInstances: newInstances, markers: newMarkers });
+      get().pushHistory();
+    },
+
+    trimClipInstanceEnd: (instanceId: string, framesToTrim: number) => {
+      const { frames, clipInstances, markers } = get();
+      const inst = clipInstances.find(i => i.id === instanceId);
+      if (!inst) return;
+      const maxTrim = inst.frameCount - 1;
+      const trim = Math.max(0, Math.min(framesToTrim, maxTrim));
+      if (trim === 0) return;
+
+      const deleteFrom = inst.startIndex + inst.frameCount - trim;
+      const deleteTo = inst.startIndex + inst.frameCount;
+
+      const newFrames = [...frames];
+      newFrames.splice(deleteFrom, deleteTo - deleteFrom);
+
+      const newInstances = clipInstances.map(other => {
+        if (other.id === instanceId) {
+          return {
+            ...other,
+            frameCount: other.frameCount - trim
+          };
+        }
+        if (other.startIndex >= deleteTo) {
+          return { ...other, startIndex: other.startIndex - trim };
+        }
+        return other;
+      });
+
+      const newMarkers = markers.map(m => {
+        if (m.frameIndex >= deleteTo) {
+          return { ...m, frameIndex: m.frameIndex - trim };
+        }
+        if (m.frameIndex >= deleteFrom && m.frameIndex < deleteTo) {
+          return { ...m, frameIndex: deleteFrom - 1 };
+        }
+        return m;
+      });
+
+      set({ frames: newFrames, clipInstances: newInstances, markers: newMarkers });
+      get().pushHistory();
+    },
+
+    setLoopPreviewByClipInstances: () => {
+      const { clipInstances, selectedClipInstanceIds, frames } = get();
+      if (selectedClipInstanceIds.length === 0) {
+        set({ isLoopPreviewing: false });
+        return;
+      }
+      const allIndices: number[] = [];
+      clipInstances.forEach(inst => {
+        if (selectedClipInstanceIds.includes(inst.id)) {
+          for (let i = inst.trimStart; i < inst.frameCount - inst.trimEnd; i++) {
+            allIndices.push(inst.startIndex + i);
+          }
+        }
+      });
+      if (allIndices.length === 0) {
+        set({ isLoopPreviewing: false });
+        return;
+      }
+      const minIdx = Math.min(...allIndices);
+      const maxIdx = Math.max(...allIndices);
+      set({ loopStartIndex: minIdx, loopEndIndex: maxIdx, isLoopPreviewing: true });
+    },
+
+    getEffectivePlaySequence: () => {
+      const { clipInstances, selectedClipInstanceIds, frames, isLoopPreviewing } = get();
+      if (selectedClipInstanceIds.length === 0 || !isLoopPreviewing) {
+        const all = [];
+        for (let i = 0; i < frames.length; i++) all.push(i);
+        return all;
+      }
+      const allIndices: number[] = [];
+      const sortedInstances = [...clipInstances].sort((a, b) => a.startIndex - b.startIndex);
+      sortedInstances.forEach(inst => {
+        if (selectedClipInstanceIds.includes(inst.id)) {
+          for (let i = inst.trimStart; i < inst.frameCount - inst.trimEnd; i++) {
+            allIndices.push(inst.startIndex + i);
+          }
+        }
+      });
+      return allIndices.length > 0 ? allIndices : frames.map((_, i) => i);
+    },
+
+    addMarker: (frameIndex: number, label: string, color: string, note?: string) => {
+      const { markers, frames } = get();
+      if (frameIndex < 0 || frameIndex >= frames.length) return;
+      const newMarker: TimelineMarker = {
+        id: `marker-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+        frameIndex,
+        color,
+        label: label || '标记',
+        note: note || '',
+        createdAt: new Date().toISOString()
+      };
+      set({ markers: [...markers, newMarker] });
+    },
+
+    updateMarker: (markerId: string, updates: Partial<TimelineMarker>) => {
+      const { markers } = get();
+      set({
+        markers: markers.map(m => (m.id === markerId ? { ...m, ...updates } : m))
+      });
+    },
+
+    deleteMarker: (markerId: string) => {
+      const { markers } = get();
+      set({ markers: markers.filter(m => m.id !== markerId) });
+    },
+
+    getMarkersByFrame: (frameIndex: number) => {
+      const { markers } = get();
+      return markers.filter(m => m.frameIndex === frameIndex);
+    },
+
     saveDraft: (name?: string) => {
-      const { frames, currentFrameIndex, drafts } = get();
+      const { frames, currentFrameIndex, drafts, clipInstances, markers, selectedClipInstanceIds } = get();
       const data = JSON.stringify({
         frames: frames.map(f => ({
           id: f.id,
           pixels: Array.from(f.pixels),
-          delay: f.delay
+          delay: f.delay,
+          clipInstanceId: f.clipInstanceId
         })),
         currentFrameIndex,
-        version: '1.0'
+        clipInstances,
+        markers,
+        selectedClipInstanceIds,
+        version: '2.0'
       });
 
       let thumbnail: string | undefined;

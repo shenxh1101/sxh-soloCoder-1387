@@ -13,6 +13,19 @@ export interface ClipInstance {
   name: string;
   startIndex: number;
   frameCount: number;
+  trimStart: number;
+  trimEnd: number;
+  speedRatio: number;
+  colorTag?: string;
+}
+
+export interface TimelineMarker {
+  id: string;
+  frameIndex: number;
+  color: string;
+  label: string;
+  note: string;
+  createdAt: string;
 }
 
 export interface SerializedFrame {
@@ -27,6 +40,9 @@ export interface PixelAnimation {
   width: number;
   height: number;
   frames: SerializedFrame[];
+  clipInstances: ClipInstance[];
+  markers: TimelineMarker[];
+  selectedClipInstanceIds: string[];
   createdAt: number;
   updatedAt: number;
 }

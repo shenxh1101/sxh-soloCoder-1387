@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Play, Pause, SkipBack, SkipForward, Repeat, Settings, ArrowLeftRight, Repeat1 } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Repeat, Settings, ArrowLeftRight, Repeat1, GitCompare, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { usePixelStore } from '@/store/usePixelStore';
 import { useCanvasStore } from '@/store/useCanvasStore';
 import { createFrameThumbnailDataUrl } from '@/utils/exportUtils';
+import type { Frame } from '@/types';
 
 const CANVAS_SIZE = 32;
 
@@ -30,6 +31,14 @@ export default function AnimationPreview() {
   const [speed, setSpeed] = useState(1);
   const [showSettings, setShowSettings] = useState(false);
   const [resumeFromCurrent, setResumeFromCurrent] = useState(true);
+  const [isReviewMode, setIsReviewMode] = useState(false);
+  const [compareFrames, setCompareFrames] = useState<Frame[]>([]);
+  const [compareDraftName, setCompareDraftName] = useState('');
+  const [reviewFrameIndex, setReviewFrameIndex] = useState(0);
+
+  const drafts = usePixelStore(state => state.drafts);
+  const getEffectivePlaySequence = usePixelStore(state => state.getEffectivePlaySequence);
+  const setLoopPreviewByClipInstances = usePixelStore(state => state.setLoopPreviewByClipInstances);
 
   const timeoutRef = useRef<number | null>(null);
   const playIndexRef = useRef(currentFrameIndex);
@@ -76,29 +85,34 @@ export default function AnimationPreview() {
     if (!frame) return;
 
     setCurrentFrameIndex(currentIndex);
+    if (isReviewMode) {
+      setReviewFrameIndex(Math.min(currentIndex, compareFrames.length - 1));
+    }
 
-    const startIdx = isLoopPreviewing ? loopStartIndex : 0;
-    const endIdx = isLoopPreviewing ? loopEndIndex : frames.length - 1;
+    const playSequence = getEffectivePlaySequence();
+    const seqLen = playSequence.length;
+    const currentSeqIdx = playSequence.indexOf(currentIndex);
+    const effectiveIdx = currentSeqIdx >= 0 ? currentSeqIdx : 0;
 
-    let nextIndex: number;
+    let nextSeqIdx: number;
     let shouldContinue = true;
 
     if (isPingPong) {
       const direction = playDirectionRef.current;
-      nextIndex = currentIndex + direction;
+      nextSeqIdx = effectiveIdx + direction;
 
-      if (nextIndex > endIdx) {
+      if (nextSeqIdx >= seqLen) {
         if (loop || isLoopPreviewing) {
-          nextIndex = endIdx - 1;
+          nextSeqIdx = seqLen - 2;
           playDirectionRef.current = -1;
           shouldContinue = incrementCurrentLoop();
         } else {
           setIsPlaying(false);
           return;
         }
-      } else if (nextIndex < startIdx) {
+      } else if (nextSeqIdx < 0) {
         if (loop || isLoopPreviewing) {
-          nextIndex = startIdx + 1;
+          nextSeqIdx = 1;
           playDirectionRef.current = 1;
           shouldContinue = incrementCurrentLoop();
         } else {
@@ -107,10 +121,10 @@ export default function AnimationPreview() {
         }
       }
     } else {
-      nextIndex = currentIndex + 1;
-      if (nextIndex > endIdx) {
+      nextSeqIdx = effectiveIdx + 1;
+      if (nextSeqIdx >= seqLen) {
         if (loop || isLoopPreviewing) {
-          nextIndex = startIdx;
+          nextSeqIdx = 0;
           shouldContinue = incrementCurrentLoop();
         } else {
           setIsPlaying(false);
@@ -124,13 +138,24 @@ export default function AnimationPreview() {
       return;
     }
 
+    const nextIndex = playSequence[nextSeqIdx];
     playIndexRef.current = nextIndex;
-    const delay = frame.delay / speed;
+
+    const inst = clipInstances.find(i =>
+      currentIndex >= i.startIndex && currentIndex < i.startIndex + i.frameCount
+    );
+    const instSpeed = inst?.speedRatio || 1.0;
+    const delay = (frame.delay / instSpeed) / speed;
 
     timeoutRef.current = window.setTimeout(playNextFrame, delay);
   };
 
   const togglePlay = () => {
+    if (isReviewMode) {
+      toggleReviewPlay();
+      return;
+    }
+
     if (!isPlaying) {
       playDirectionRef.current = 1;
       resetCurrentLoop();
@@ -138,26 +163,14 @@ export default function AnimationPreview() {
       if (!resumeFromCurrent) {
         if (isLoopPreviewing) {
           playIndexRef.current = loopStartIndex;
+        } else if (selectedClipInstanceIds.length > 0 && clipInstances.length > 0) {
+          setLoopPreviewByClipInstances();
+          const seq = getEffectivePlaySequence();
+          playIndexRef.current = seq[0];
         } else if (selectedFrameIndices.length >= 2) {
           const sorted = [...selectedFrameIndices].sort((a, b) => a - b);
           usePixelStore.getState().setLoopPreview(sorted[0], sorted[sorted.length - 1]);
           playIndexRef.current = sorted[0];
-        } else if (selectedClipInstanceIds.length > 0 && clipInstances.length > 0) {
-          const selectedIndices: number[] = [];
-          clipInstances.forEach(inst => {
-            if (selectedClipInstanceIds.includes(inst.id)) {
-              for (let i = 0; i < inst.frameCount; i++) {
-                selectedIndices.push(inst.startIndex + i);
-              }
-            }
-          });
-          if (selectedIndices.length >= 1) {
-            const sorted = [...selectedIndices].sort((a, b) => a - b);
-            usePixelStore.getState().setLoopPreview(sorted[0], sorted[sorted.length - 1]);
-            playIndexRef.current = sorted[0];
-          } else {
-            playIndexRef.current = currentFrameIndex;
-          }
         } else {
           playIndexRef.current = currentFrameIndex;
         }
@@ -186,15 +199,88 @@ export default function AnimationPreview() {
     resetCurrentLoop();
   };
 
+  const enterReviewMode = () => {
+    if (drafts.length === 0) return;
+    const latestDraft = drafts[0];
+    try {
+      const parsed = JSON.parse(latestDraft.data);
+      if (parsed.frames && Array.isArray(parsed.frames)) {
+        const cfs: Frame[] = parsed.frames.map((f: { id: string; pixels: number[]; delay: number }) => ({
+          id: f.id,
+          pixels: new Uint8ClampedArray(f.pixels),
+          delay: f.delay || 100
+        }));
+        setCompareFrames(cfs);
+        setCompareDraftName(latestDraft.name);
+        setReviewFrameIndex(Math.min(currentFrameIndex, cfs.length - 1));
+        setIsReviewMode(true);
+        setIsPlaying(false);
+      }
+    } catch (e) {
+      console.error('Failed to load draft for review:', e);
+    }
+  };
+
+  const exitReviewMode = () => {
+    setIsReviewMode(false);
+    setCompareFrames([]);
+  };
+
+  const reviewPrevFrame = () => {
+    const maxLeft = Math.min(frames.length, compareFrames.length) - 1;
+    setReviewFrameIndex(Math.max(0, reviewFrameIndex - 1));
+    setCurrentFrameIndex(Math.max(0, Math.min(maxLeft, currentFrameIndex - 1)));
+  };
+
+  const reviewNextFrame = () => {
+    const maxLeft = Math.min(frames.length, compareFrames.length) - 1;
+    setReviewFrameIndex(Math.min(maxLeft, reviewFrameIndex + 1));
+    setCurrentFrameIndex(Math.min(maxLeft, currentFrameIndex + 1));
+  };
+
+  const toggleReviewPlay = () => {
+    if (isPlaying) {
+      setIsPlaying(false);
+      return;
+    }
+    setIsPlaying(true);
+    resetCurrentLoop();
+  };
+
   const currentFrame = frames[currentFrameIndex];
   const previewSize = CANVAS_SIZE * previewZoom;
 
   return (
     <div className="panel p-3 w-64">
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-xs font-bold text-pixel-text font-mono">预览</h3>
+        <h3 className="text-xs font-bold text-pixel-text font-mono">
+        {isReviewMode ? '审片模式' : '预览'}
+        </h3>
         <div className="flex items-center gap-1">
-          {isLoopPreviewing && (
+          {!isReviewMode && (
+            <button
+              onClick={enterReviewMode}
+              disabled={drafts.length === 0}
+              className={"text-[10px] font-mono px-1.5 py-0.5 flex items-center gap-0.5 transition-colors " + (drafts.length === 0
+                ? 'opacity-40 cursor-not-allowed text-pixel-text-muted'
+                : 'bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30')}
+              title={drafts.length === 0 ? '没有可对比的版本' : '进入审片模式，与上一版本并排对比'}
+            >
+              <GitCompare size={11} />
+              审片
+            </button>
+          )}
+          {isReviewMode && (
+            <button
+              onClick={exitReviewMode}
+              className="text-[10px] bg-pixel-danger/20 text-pixel-danger px-1.5 py-0.5 font-mono hover:bg-pixel-danger/30 transition-colors flex items-center gap-0.5"
+              title="退出审片模式"
+            >
+              <X size={11} />
+              退出
+            </button>
+          )}
+          {isLoopPreviewing && !isReviewMode && (
             <button
               onClick={() => setIsLoopPreviewing(false)}
               className="text-[10px] bg-pixel-primary/20 text-pixel-primary px-1.5 py-0.5 font-mono hover:bg-pixel-primary/30 transition-colors"
@@ -203,63 +289,139 @@ export default function AnimationPreview() {
               {loopStartIndex + 1}-{loopEndIndex + 1}
             </button>
           )}
-          {maxLoopCount > 0 && (
+          {maxLoopCount > 0 && !isReviewMode && (
             <span className="text-[10px] bg-pixel-accent/20 text-pixel-accent px-1.5 py-0.5 font-mono">
               ×{maxLoopCount}
             </span>
           )}
-          <button
-            onClick={() => setShowSettings(!showSettings)}
-            className={`p-1 ${showSettings ? 'text-pixel-primary' : 'text-pixel-text-muted'} hover:text-pixel-text transition-colors`}
-            title="设置"
-          >
-            <Settings size={14} />
-          </button>
-        </div>
-      </div>
-
-      <div className="flex justify-center mb-3">
-        <div className="checkerboard border-2 border-pixel-border" style={{ width: previewSize, height: previewSize }}>
-          {currentFrame && (
-            <img
-              src={createFrameThumbnailDataUrl(currentFrame, CANVAS_SIZE * previewZoom)}
-              alt="预览"
-              className="w-full h-full pixelated object-contain"
-            />
+          {!isReviewMode && (
+            <button
+              onClick={() => setShowSettings(!showSettings)}
+              className={`p-1 ${showSettings ? 'text-pixel-primary' : 'text-pixel-text-muted'} hover:text-pixel-text transition-colors`}
+              title="设置"
+            >
+              <Settings size={14} />
+            </button>
           )}
         </div>
       </div>
 
+      {!isReviewMode ? (
+        <div className="flex justify-center mb-3">
+          <div className="checkerboard border-2 border-pixel-border" style={{ width: previewSize, height: previewSize }}>
+            {currentFrame && (
+              <img
+                src={createFrameThumbnailDataUrl(currentFrame, CANVAS_SIZE * previewZoom)}
+                alt="预览"
+                className="w-full h-full pixelated object-contain"
+              />
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="mb-3">
+          <div className="flex justify-center gap-2 mb-2">
+            <div className="flex flex-col items-center">
+              <span className="text-[9px] font-mono text-pixel-text-muted mb-1">当前版本</span>
+              <div className="checkerboard border-2 border-pixel-primary" style={{ width: previewSize * 0.8, height: previewSize * 0.8 }}>
+                {currentFrame && (
+                  <img
+                    src={createFrameThumbnailDataUrl(currentFrame, CANVAS_SIZE * previewZoom * 0.8)}
+                    alt="当前版本"
+                    className="w-full h-full pixelated object-contain"
+                  />
+                )}
+              </div>
+            </div>
+            <div className="flex items-center">
+              <span className="text-xl font-bold text-pixel-primary font-mono">vs</span>
+            </div>
+            <div className="flex flex-col items-center">
+              <span className="text-[9px] font-mono text-cyan-400 mb-1">{compareDraftName || '上一版本'}</span>
+              <div className="checkerboard border-2 border-cyan-500" style={{ width: previewSize * 0.8, height: previewSize * 0.8 }}>
+                {compareFrames[reviewFrameIndex] && (
+                  <img
+                    src={createFrameThumbnailDataUrl(compareFrames[reviewFrameIndex], CANVAS_SIZE * previewZoom * 0.8)}
+                    alt="对比版本"
+                    className="w-full h-full pixelated object-contain"
+                  />
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="text-center text-[10px] font-mono text-pixel-text-muted">
+            帧 {currentFrameIndex + 1} / {Math.min(frames.length, compareFrames.length)}
+            {currentFrame && currentFrameIndex === reviewFrameIndex ? ' · 同步帧对照' : ''}
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-center gap-1 mb-2">
-        <button
-          onClick={goToFirst}
-          className="p-1.5 hover:bg-pixel-surface-light text-pixel-text hover:text-pixel-primary transition-colors"
-          title="第一帧"
-        >
-          <SkipBack size={14} />
-        </button>
+        {!isReviewMode ? (
+          <>
+            <button
+              onClick={goToFirst}
+              className="p-1.5 hover:bg-pixel-surface-light text-pixel-text hover:text-pixel-primary transition-colors"
+              title="第一帧"
+            >
+              <SkipBack size={14} />
+            </button>
 
-        <button
-          onClick={togglePlay}
-          className={`
-            p-2 border-2 transition-all
-            ${isPlaying
-              ? 'bg-pixel-primary border-pixel-primary text-white'
-              : 'bg-pixel-surface-light border-pixel-border text-pixel-text hover:border-pixel-primary'
-            }
-          `}
-          title={isPlaying ? '暂停' : (selectedFrameIndices.length >= 2 || selectedClipInstanceIds.length > 0 ? '循环播放选中' : (resumeFromCurrent ? '从当前帧播放' : '从头播放'))}
-        >
-          {isPlaying ? <Pause size={16} /> : <Play size={16} />}
-        </button>
+            <button
+              onClick={togglePlay}
+              className={`
+                p-2 border-2 transition-all
+                ${isPlaying
+                  ? 'bg-pixel-primary border-pixel-primary text-white'
+                  : 'bg-pixel-surface-light border-pixel-border text-pixel-text hover:border-pixel-primary'
+                }
+              `}
+              title={isPlaying ? '暂停' : (selectedFrameIndices.length >= 2 || selectedClipInstanceIds.length > 0 ? '循环播放选中' : (resumeFromCurrent ? '从当前帧播放' : '从头播放'))}
+            >
+              {isPlaying ? <Pause size={16} /> : <Play size={16} />}
+            </button>
 
-        <button
-          onClick={goToLast}
-          className="p-1.5 hover:bg-pixel-surface-light text-pixel-text hover:text-pixel-primary transition-colors"
-          title="最后一帧"
-        >
-          <SkipForward size={14} />
-        </button>
+            <button
+              onClick={goToLast}
+              className="p-1.5 hover:bg-pixel-surface-light text-pixel-text hover:text-pixel-primary transition-colors"
+              title="最后一帧"
+            >
+              <SkipForward size={14} />
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={reviewPrevFrame}
+              className="p-1.5 hover:bg-pixel-surface-light text-pixel-text hover:text-pixel-primary transition-colors"
+              title="上一帧（同步）"
+            >
+              <ChevronLeft size={16} />
+            </button>
+
+            <button
+              onClick={togglePlay}
+              className={`
+                p-2 border-2 transition-all
+                ${isPlaying
+                  ? 'bg-cyan-500 border-cyan-500 text-white'
+                  : 'bg-pixel-surface-light border-pixel-border text-pixel-text hover:border-cyan-500'
+                }
+              `}
+              title={isPlaying ? '暂停同步播放' : '同步播放对比'}
+            >
+              {isPlaying ? <Pause size={16} /> : <Play size={16} />}
+            </button>
+
+            <button
+              onClick={reviewNextFrame}
+              className="p-1.5 hover:bg-pixel-surface-light text-pixel-text hover:text-pixel-primary transition-colors"
+              title="下一帧（同步）"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </>
+        )}
       </div>
 
       <div className="flex items-center justify-center gap-2 mb-2 flex-wrap">

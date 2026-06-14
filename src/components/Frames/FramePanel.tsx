@@ -1,9 +1,9 @@
 import { useRef, useEffect, useState, useMemo } from 'react';
-import { Plus, Trash2, Copy, ChevronLeft, ChevronRight, GripVertical, Play, Pause, Scissors, Clipboard, Clock, Film, Save, Layers } from 'lucide-react';
+import { Plus, Trash2, Copy, ChevronLeft, ChevronRight, GripVertical, Play, Pause, Scissors, Clipboard, Clock, Film, Save, Layers, Flag, Gauge } from 'lucide-react';
 import { usePixelStore } from '@/store/usePixelStore';
 import { useClipStore } from '@/store/useClipStore';
 import { createFrameThumbnailDataUrl } from '@/utils/exportUtils';
-import type { Frame } from '@/types';
+import type { Frame, TimelineMarker } from '@/types';
 
 export default function FramePanel() {
   const frames = usePixelStore(state => state.frames);
@@ -30,6 +30,9 @@ export default function FramePanel() {
   const clipInstances = usePixelStore(state => state.clipInstances);
   const addClipInstance = usePixelStore(state => state.addClipInstance);
   const moveClipInstance = usePixelStore(state => state.moveClipInstance);
+  const markers = usePixelStore(state => state.markers);
+  const addMarker = usePixelStore(state => state.addMarker);
+  const getMarkersByFrame = usePixelStore(state => state.getMarkersByFrame);
 
   const createClipFromFrames = useClipStore(state => state.createClipFromFrames);
   const saveClip = useClipStore(state => state.saveClip);
@@ -44,6 +47,10 @@ export default function FramePanel() {
   const [hasClipboard, setHasClipboard] = useState(false);
   const [showSaveClipModal, setShowSaveClipModal] = useState(false);
   const [clipName, setClipName] = useState('');
+  const [showMarkerModal, setShowMarkerModal] = useState(false);
+  const [markerLabel, setMarkerLabel] = useState('');
+  const [markerColor, setMarkerColor] = useState('#eab308');
+  const [markerNote, setMarkerNote] = useState('');
 
   useEffect(() => {
     loadClipsFromStorage();
@@ -213,6 +220,18 @@ export default function FramePanel() {
     addClipInstance(sorted[0], sorted.length, `分组 ${clipInstances.length + 1}`);
   };
 
+  const handleAddMarker = () => {
+    setMarkerLabel(`关键帧 ${currentFrameIndex + 1}`);
+    setMarkerNote('');
+    setShowMarkerModal(true);
+  };
+
+  const confirmAddMarker = () => {
+    if (!markerLabel.trim()) return;
+    addMarker(currentFrameIndex, markerLabel.trim(), markerColor, markerNote.trim());
+    setShowMarkerModal(false);
+  };
+
   useEffect(() => {
     const checkClipboard = () => {
       const state = usePixelStore.getState();
@@ -303,6 +322,13 @@ export default function FramePanel() {
               >
                 <Layers size={14} />
               </button>
+              <button
+                onClick={handleAddMarker}
+                className="p-1.5 hover:bg-pixel-surface-light text-pixel-text-muted hover:text-yellow-400 transition-colors"
+                title="在当前帧添加时间轴标记"
+              >
+                <Flag size={14} />
+              </button>
               <div className="w-px h-5 bg-pixel-border mx-1" />
             </>
           )}
@@ -357,6 +383,7 @@ export default function FramePanel() {
         >
           {frames.map((frame, index) => {
             const inst = getClipInstanceByFrameIndex(index);
+            const frameMarkers = getMarkersByFrame(index);
             return (
             <FrameThumbnail
               key={frame.id}
@@ -364,6 +391,10 @@ export default function FramePanel() {
               index={index}
               clipInstanceId={inst?.id}
               clipInstanceStyle={inst ? clipInstanceColorMap[inst.id] : undefined}
+              speedRatio={inst?.speedRatio || 1.0}
+              isTrimStart={inst ? index === inst.startIndex + inst.trimStart && inst.trimStart > 0 : false}
+              isTrimEnd={inst ? index === inst.startIndex + inst.frameCount - 1 - inst.trimEnd && inst.trimEnd > 0 : false}
+              markers={frameMarkers}
               isActive={index === currentFrameIndex}
               isSelected={selectedFrameIndices.includes(index)}
               isInLoopRange={isLoopPreviewing && index >= loopStartIndex && index <= loopEndIndex}
@@ -434,6 +465,60 @@ export default function FramePanel() {
           </div>
         </div>
       )}
+
+      {showMarkerModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-pixel-surface border-4 border-yellow-500 p-5 w-80">
+            <h3 className="text-lg font-bold text-pixel-text mb-4 font-mono flex items-center gap-2">
+              <Flag size={18} className="text-yellow-500" />
+              添加时间轴标记
+            </h3>
+            <p className="text-xs text-pixel-text-muted mb-3 font-mono">
+              在第 {currentFrameIndex + 1} 帧添加标记
+            </p>
+            <input
+              type="text"
+              value={markerLabel}
+              onChange={(e) => setMarkerLabel(e.target.value)}
+              className="w-full text-sm font-mono bg-pixel-bg border-2 border-pixel-border text-pixel-text px-3 py-2 mb-3 focus:border-yellow-500 outline-none"
+              placeholder="标签（如：起跳、落地）"
+              autoFocus
+              onKeyDown={(e) => e.key === 'Enter' && confirmAddMarker()}
+            />
+            <textarea
+              value={markerNote}
+              onChange={(e) => setMarkerNote(e.target.value)}
+              className="w-full text-sm font-mono bg-pixel-bg border-2 border-pixel-border text-pixel-text px-3 py-2 mb-3 focus:border-yellow-500 outline-none h-16 resize-none"
+              placeholder="备注（可选）"
+            />
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-xs text-pixel-text-muted font-mono">颜色:</span>
+              {['#eab308', '#ef4444', '#22c55e', '#3b82f6', '#a855f7', '#f97316', '#06b6d4', '#ec4899'].map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setMarkerColor(c)}
+                  className={'w-5 h-5 rounded-full border-2 transition-transform ' + (markerColor === c ? 'border-white scale-110' : 'border-transparent')}
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={confirmAddMarker}
+                className="flex-1 py-2 bg-yellow-500 text-white font-mono text-sm border-2 border-yellow-500 hover:bg-yellow-600 transition-colors"
+              >
+                添加
+              </button>
+              <button
+                onClick={() => setShowMarkerModal(false)}
+                className="flex-1 py-2 bg-pixel-surface text-pixel-text font-mono text-sm border-2 border-pixel-border hover:bg-pixel-surface-light transition-colors"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -443,6 +528,10 @@ interface FrameThumbnailProps {
   index: number;
   clipInstanceId?: string;
   clipInstanceStyle?: { border: string; bg: string; label: string };
+  speedRatio: number;
+  isTrimStart: boolean;
+  isTrimEnd: boolean;
+  markers: TimelineMarker[];
   isActive: boolean;
   isSelected: boolean;
   isInLoopRange: boolean;
@@ -463,6 +552,10 @@ function FrameThumbnail({
   index,
   clipInstanceId,
   clipInstanceStyle,
+  speedRatio,
+  isTrimStart,
+  isTrimEnd,
+  markers,
   isActive,
   isSelected,
   isInLoopRange,
@@ -523,6 +616,33 @@ function FrameThumbnail({
             <div className="w-1.5 h-1.5 bg-white" />
           </div>
         </div>
+      )}
+
+      {markers.length > 0 && (
+        <div className="absolute -top-1 left-1/2 -translate-x-1/2 z-20 flex gap-0.5">
+          {markers.slice(0, 3).map((m) => (
+            <div
+              key={m.id}
+              className="w-2 h-2 rounded-full border border-white shadow-sm"
+              style={{ backgroundColor: m.color }}
+              title={m.label + (m.note ? ': ' + m.note : '')}
+            />
+          ))}
+        </div>
+      )}
+
+      {speedRatio !== 1.0 && (
+        <div className="absolute -bottom-0.5 right-0.5 z-20 bg-pixel-primary text-white text-[8px] font-mono px-1 py-0.5 border border-white flex items-center gap-0.5">
+          <Gauge size={8} />
+          {speedRatio.toFixed(1)}×
+        </div>
+      )}
+
+      {isTrimStart && (
+        <div className="absolute top-0 left-0 bottom-0 w-1 bg-pixel-danger z-20" title="片段裁切起点" />
+      )}
+      {isTrimEnd && (
+        <div className="absolute top-0 right-0 bottom-0 w-1 bg-pixel-danger z-20" title="片段裁切终点" />
       )}
 
       <div className="absolute top-0.5 left-0.5 z-10 flex items-center gap-1">
