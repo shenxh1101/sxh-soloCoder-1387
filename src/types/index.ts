@@ -67,6 +67,8 @@ export interface SelectionState {
 
   flipSelectionHorizontal: () => void;
   flipSelectionVertical: () => void;
+
+  nudgeSelection: (dx: number, dy: number) => void;
 }
 
 export interface Point {
@@ -88,3 +90,19 @@ export interface Circle {
 }
 
 export type RGBA = [number, number, number, number];
+
+export interface Clip {
+  id: string;
+  name: string;
+  frameCount: number;
+  frames: SerializedFrame[];
+  createdAt: string;
+}
+
+export interface DraftEntry {
+  id: string;
+  name: string;
+  savedAt: string;
+  frameCount: number;
+  data: string;
+}

@@ -157,9 +157,7 @@ export default function PixelCanvas() {
       return;
     }
 
-    if (currentTool !== 'select') {
-      clearSelection();
-    }
+    clearSelection();
 
     isDrawingRef.current = true;
     lastPosRef.current = pos;

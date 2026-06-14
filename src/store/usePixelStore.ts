@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Frame } from '@/types';
+import type { Frame, DraftEntry } from '@/types';
 import { createEmptyPixels, copyPixels } from '@/utils/colorUtils';
 
 const CANVAS_SIZE = 32;
@@ -33,6 +33,9 @@ interface PixelState {
   isLoopPreviewing: boolean;
   loopStartIndex: number;
   loopEndIndex: number;
+  isPingPong: boolean;
+
+  drafts: DraftEntry[];
 
   setCurrentFrameIndex: (index: number) => void;
   getCurrentFrame: () => Frame | undefined;
@@ -43,6 +46,7 @@ interface PixelState {
   moveFrame: (fromIndex: number, toIndex: number) => void;
   setFrameDelay: (index: number, delay: number) => void;
   insertFrameAt: (frame: Frame, index: number) => void;
+  insertFramesAt: (frames: Frame[], index: number) => void;
 
   setSelectedFrameIndices: (indices: number[]) => void;
   toggleFrameSelection: (index: number) => void;
@@ -54,6 +58,7 @@ interface PixelState {
 
   setLoopPreview: (start: number, end: number) => void;
   setIsLoopPreviewing: (value: boolean) => void;
+  setIsPingPong: (value: boolean) => void;
 
   updateCurrentFramePixels: (pixels: Uint8ClampedArray) => void;
 
@@ -66,6 +71,11 @@ interface PixelState {
 
   exportProject: () => string;
   loadProject: (data: string) => void;
+
+  saveDraft: (name?: string) => void;
+  loadDraft: (draftId: string) => void;
+  deleteDraft: (draftId: string) => void;
+  loadDrafts: () => void;
 }
 
 let clipboardFrames: Frame[] = [];
@@ -87,7 +97,9 @@ export const usePixelStore = create<PixelState>((set, get) => {
     selectedFrameIndices: [] as number[],
     isLoopPreviewing: false,
     loopStartIndex: 0,
-    loopEndIndex: 0
+    loopEndIndex: 0,
+    isPingPong: false,
+    drafts: [] as DraftEntry[]
   };
 
   return {
@@ -402,6 +414,78 @@ export const usePixelStore = create<PixelState>((set, get) => {
         get().pushHistory();
       } catch (e) {
         console.error('Failed to load project:', e);
+      }
+    },
+
+    insertFramesAt: (framesToInsert: Frame[], index: number) => {
+      const { frames } = get();
+      const newFrames = [...frames];
+      const indices: number[] = [];
+      framesToInsert.forEach((frame, idx) => {
+        const insertPos = index + idx;
+        newFrames.splice(insertPos, 0, {
+          ...frame,
+          id: frame.id || generateId(),
+          pixels: new Uint8ClampedArray(frame.pixels)
+        });
+        indices.push(insertPos);
+      });
+      set({ frames: newFrames, currentFrameIndex: index, selectedFrameIndices: indices });
+      get().pushHistory();
+    },
+
+    setIsPingPong: (value: boolean) => {
+      set({ isPingPong: value });
+    },
+
+    saveDraft: (name?: string) => {
+      const { frames, currentFrameIndex, drafts } = get();
+      const data = JSON.stringify({
+        frames: frames.map(f => ({
+          id: f.id,
+          pixels: Array.from(f.pixels),
+          delay: f.delay
+        })),
+        currentFrameIndex,
+        version: '1.0'
+      });
+
+      const draft: DraftEntry = {
+        id: `draft-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        name: name || `草稿 ${new Date().toLocaleString('zh-CN')}`,
+        savedAt: new Date().toISOString(),
+        frameCount: frames.length,
+        data
+      };
+
+      const newDrafts = [draft, ...drafts].slice(0, 10);
+      localStorage.setItem('pixel_animation_drafts', JSON.stringify(newDrafts));
+      set({ drafts: newDrafts });
+    },
+
+    loadDraft: (draftId: string) => {
+      const { drafts } = get();
+      const draft = drafts.find(d => d.id === draftId);
+      if (!draft) return;
+      get().loadProject(draft.data);
+    },
+
+    deleteDraft: (draftId: string) => {
+      const { drafts } = get();
+      const newDrafts = drafts.filter(d => d.id !== draftId);
+      localStorage.setItem('pixel_animation_drafts', JSON.stringify(newDrafts));
+      set({ drafts: newDrafts });
+    },
+
+    loadDrafts: () => {
+      const saved = localStorage.getItem('pixel_animation_drafts');
+      if (saved) {
+        try {
+          const drafts = JSON.parse(saved);
+          set({ drafts });
+        } catch (e) {
+          console.error('Failed to load drafts:', e);
+        }
       }
     }
   };

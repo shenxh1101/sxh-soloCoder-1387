@@ -37,6 +37,8 @@ export default function Home() {
   const hasClipboardData = useSelectionStore(state => state.clipboardPixels !== null);
   const hasSelection = useSelectionStore(state => state.selection !== null);
   const pasteSelection = useSelectionStore(state => state.pasteSelection);
+  const nudgeSelection = useSelectionStore(state => state.nudgeSelection);
+  const currentTool = useToolStore(state => state.currentTool);
   const selectedFrameIndices = usePixelStore(state => state.selectedFrameIndices);
   const setSelectedFrameIndices = usePixelStore(state => state.setSelectedFrameIndices);
   const isLoopPreviewing = usePixelStore(state => state.isLoopPreviewing);
@@ -171,7 +173,10 @@ export default function Home() {
 
       if (key === 'arrowleft') {
         e.preventDefault();
-        if (e.ctrlKey || e.metaKey) {
+        if (hasSelection && currentTool === 'select') {
+          const step = e.shiftKey ? 5 : 1;
+          nudgeSelection(-step, 0);
+        } else if (e.ctrlKey || e.metaKey) {
         } else {
           setCurrentFrameIndex(Math.max(0, currentFrameIndex - 1));
         }
@@ -180,9 +185,30 @@ export default function Home() {
 
       if (key === 'arrowright') {
         e.preventDefault();
-        if (e.ctrlKey || e.metaKey) {
+        if (hasSelection && currentTool === 'select') {
+          const step = e.shiftKey ? 5 : 1;
+          nudgeSelection(step, 0);
+        } else if (e.ctrlKey || e.metaKey) {
         } else {
           setCurrentFrameIndex(Math.min(frames.length - 1, currentFrameIndex + 1));
+        }
+        return;
+      }
+
+      if (key === 'arrowup') {
+        e.preventDefault();
+        if (hasSelection && currentTool === 'select') {
+          const step = e.shiftKey ? 5 : 1;
+          nudgeSelection(0, -step);
+        }
+        return;
+      }
+
+      if (key === 'arrowdown') {
+        e.preventDefault();
+        if (hasSelection && currentTool === 'select') {
+          const step = e.shiftKey ? 5 : 1;
+          nudgeSelection(0, step);
         }
         return;
       }
@@ -230,7 +256,7 @@ export default function Home() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setCurrentTool, undo, redo, zoomIn, zoomOut, addFrame, deleteFrame, duplicateFrame, currentFrameIndex, setCurrentFrameIndex, frames.length, toggleGrid, toggleOnionSkin, pushHistory, clearSelection, copySelection, cutSelection, pasteSelection, hasClipboardData, hasSelection, selectedFrameIndices, setSelectedFrameIndices, isLoopPreviewing, setIsLoopPreviewing]);
+  }, [setCurrentTool, undo, redo, zoomIn, zoomOut, addFrame, deleteFrame, duplicateFrame, currentFrameIndex, setCurrentFrameIndex, frames.length, toggleGrid, toggleOnionSkin, pushHistory, clearSelection, copySelection, cutSelection, pasteSelection, hasClipboardData, hasSelection, selectedFrameIndices, setSelectedFrameIndices, isLoopPreviewing, setIsLoopPreviewing, nudgeSelection, currentTool]);
 
   useEffect(() => {
     const handleBeforeUnload = () => {

@@ -1,7 +1,9 @@
 import { useRef, useEffect, useState } from 'react';
-import { Plus, Trash2, Copy, ChevronLeft, ChevronRight, GripVertical, Play, Pause, Scissors, Clipboard, Clock } from 'lucide-react';
+import { Plus, Trash2, Copy, ChevronLeft, ChevronRight, GripVertical, Play, Pause, Scissors, Clipboard, Clock, Film, Save } from 'lucide-react';
 import { usePixelStore } from '@/store/usePixelStore';
+import { useClipStore } from '@/store/useClipStore';
 import { createFrameThumbnailDataUrl } from '@/utils/exportUtils';
+import type { Frame } from '@/types';
 
 export default function FramePanel() {
   const frames = usePixelStore(state => state.frames);
@@ -26,6 +28,10 @@ export default function FramePanel() {
   const setLoopPreview = usePixelStore(state => state.setLoopPreview);
   const setIsLoopPreviewing = usePixelStore(state => state.setIsLoopPreviewing);
 
+  const createClipFromFrames = useClipStore(state => state.createClipFromFrames);
+  const saveClip = useClipStore(state => state.saveClip);
+  const loadClipsFromStorage = useClipStore(state => state.loadClipsFromStorage);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
@@ -33,6 +39,12 @@ export default function FramePanel() {
   const [showBatchDelay, setShowBatchDelay] = useState(false);
   const [batchDelayValue, setBatchDelayValue] = useState(100);
   const [hasClipboard, setHasClipboard] = useState(false);
+  const [showSaveClipModal, setShowSaveClipModal] = useState(false);
+  const [clipName, setClipName] = useState('');
+
+  useEffect(() => {
+    loadClipsFromStorage();
+  }, [loadClipsFromStorage]);
 
   const scrollToFrame = (index: number) => {
     const container = scrollRef.current;
@@ -119,6 +131,22 @@ export default function FramePanel() {
     pasteFrames(insertIndex);
   };
 
+  const handleSaveClip = () => {
+    if (selectedFrameIndices.length === 0) return;
+    setClipName(`片段 ${new Date().toLocaleString('zh-CN')}`);
+    setShowSaveClipModal(true);
+  };
+
+  const confirmSaveClip = () => {
+    if (selectedFrameIndices.length === 0 || !clipName.trim()) return;
+    const sortedIndices = [...selectedFrameIndices].sort((a, b) => a - b);
+    const selectedFrames: Frame[] = sortedIndices.map(i => frames[i]).filter(Boolean);
+    const clip = createClipFromFrames(clipName.trim(), selectedFrames);
+    saveClip(clip);
+    setShowSaveClipModal(false);
+    setClipName('');
+  };
+
   useEffect(() => {
     const checkClipboard = () => {
       const state = usePixelStore.getState();
@@ -128,7 +156,8 @@ export default function FramePanel() {
   }, [selectedFrameIndices, hasClipboard]);
 
   return (
-    <div className="h-36 bg-pixel-surface border-t-2 border-pixel-border flex flex-col">
+    <>
+      <div className="h-36 bg-pixel-surface border-t-2 border-pixel-border flex flex-col">
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-pixel-border">
         <div className="flex items-center gap-2">
           <span className="text-xs text-pixel-text-muted font-mono">帧</span>
@@ -191,6 +220,13 @@ export default function FramePanel() {
                   {isLoopPreviewing ? <Pause size={14} /> : <Play size={14} />}
                 </button>
               )}
+              <button
+                onClick={handleSaveClip}
+                className="p-1.5 hover:bg-pixel-surface-light text-pixel-text-muted hover:text-pixel-primary transition-colors"
+                title="保存为片段（可复用的帧序列）"
+              >
+                <Save size={14} />
+              </button>
               <div className="w-px h-5 bg-pixel-border mx-1" />
             </>
           )}
@@ -280,7 +316,45 @@ export default function FramePanel() {
           提示: Shift+点击 连续选择 | Ctrl+点击 多选 | Ctrl+C/V 复制粘贴帧
         </span>
       </div>
-    </div>
+      </div>
+
+      {showSaveClipModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-pixel-surface border-4 border-pixel-primary p-5 w-80">
+            <h3 className="text-lg font-bold text-pixel-text mb-4 font-mono flex items-center gap-2">
+              <Film size={18} className="text-pixel-primary" />
+              保存为片段
+            </h3>
+            <p className="text-xs text-pixel-text-muted mb-3 font-mono">
+              选中了 {selectedFrameIndices.length} 帧，保存为可复用的片段
+            </p>
+            <input
+              type="text"
+              value={clipName}
+              onChange={(e) => setClipName(e.target.value)}
+              className="w-full text-sm font-mono bg-pixel-bg border-2 border-pixel-border text-pixel-text px-3 py-2 mb-4 focus:border-pixel-primary outline-none"
+              placeholder="给片段起个名字..."
+              autoFocus
+              onKeyDown={(e) => e.key === 'Enter' && confirmSaveClip()}
+            />
+            <div className="flex gap-3">
+              <button
+                onClick={confirmSaveClip}
+                className="flex-1 py-2 bg-pixel-primary text-white font-mono text-sm border-2 border-pixel-primary hover:bg-pixel-primary/80 transition-colors"
+              >
+                保存
+              </button>
+              <button
+                onClick={() => setShowSaveClipModal(false)}
+                className="flex-1 py-2 bg-pixel-surface text-pixel-text font-mono text-sm border-2 border-pixel-border hover:bg-pixel-surface-light transition-colors"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

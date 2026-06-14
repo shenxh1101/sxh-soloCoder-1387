@@ -87,6 +87,8 @@ interface SelectionStore extends SelectionState {
   updateCurrentFramePixels: (pixels: Uint8ClampedArray) => void;
   pushHistory: () => void;
   tempSelectionStart: { x: number; y: number } | null;
+  basePixelsAfterErase: Uint8ClampedArray | null;
+  nudgeSelection: (dx: number, dy: number) => void;
 }
 
 export const useSelectionStore = create<SelectionStore>((set, get) => ({
@@ -97,6 +99,7 @@ export const useSelectionStore = create<SelectionStore>((set, get) => ({
   clipboardPixels: null,
   clipboardSize: null,
   tempSelectionStart: null,
+  basePixelsAfterErase: null,
   setCurrentFramePixels: () => {},
   getCurrentFramePixels: () => new Uint8ClampedArray(),
   updateCurrentFramePixels: () => {},
@@ -106,7 +109,8 @@ export const useSelectionStore = create<SelectionStore>((set, get) => ({
     set({
       tempSelectionStart: { x, y },
       selection: { x, y, width: 1, height: 1 },
-      selectionPixels: null
+      selectionPixels: null,
+      basePixelsAfterErase: null
     });
   },
 
@@ -142,7 +146,8 @@ export const useSelectionStore = create<SelectionStore>((set, get) => ({
       selection: null,
       selectionPixels: null,
       isDraggingSelection: false,
-      dragOffset: { x: 0, y: 0 }
+      dragOffset: { x: 0, y: 0 },
+      basePixelsAfterErase: null
     });
   },
 
@@ -162,6 +167,7 @@ export const useSelectionStore = create<SelectionStore>((set, get) => ({
 
       set({
         isDraggingSelection: true,
+        basePixelsAfterErase: erased,
         dragOffset: {
           x: x - selection.x,
           y: y - selection.y
@@ -173,21 +179,23 @@ export const useSelectionStore = create<SelectionStore>((set, get) => ({
   },
 
   updateDragPosition: (x: number, y: number) => {
-    const { isDraggingSelection, selectionPixels, dragOffset, selection, getCurrentFramePixels, updateCurrentFramePixels } = get();
-    if (!isDraggingSelection || !selectionPixels || !selection) return;
+    const { isDraggingSelection, selectionPixels, dragOffset, selection, basePixelsAfterErase, updateCurrentFramePixels } = get();
+    if (!isDraggingSelection || !selectionPixels || !selection || !basePixelsAfterErase) return;
 
     const newX = x - dragOffset.x;
     const newY = y - dragOffset.y;
 
-    const currentPixels = getCurrentFramePixels();
-    const pasted = pastePixels(currentPixels, selectionPixels, newX, newY, selection.width, selection.height);
+    const clampedX = Math.max(0, Math.min(CANVAS_SIZE - selection.width, newX));
+    const clampedY = Math.max(0, Math.min(CANVAS_SIZE - selection.height, newY));
+
+    const pasted = pastePixels(basePixelsAfterErase, selectionPixels, clampedX, clampedY, selection.width, selection.height);
     updateCurrentFramePixels(pasted);
 
     set({
       selection: {
         ...selection,
-        x: newX,
-        y: newY
+        x: clampedX,
+        y: clampedY
       }
     });
   },
@@ -199,8 +207,35 @@ export const useSelectionStore = create<SelectionStore>((set, get) => ({
     }
     set({
       isDraggingSelection: false,
-      dragOffset: { x: 0, y: 0 }
+      dragOffset: { x: 0, y: 0 },
+      basePixelsAfterErase: null
     });
+  },
+
+  nudgeSelection: (dx: number, dy: number) => {
+    const { selection, selectionPixels, getCurrentFramePixels, updateCurrentFramePixels, pushHistory } = get();
+    if (!selection || !selectionPixels) return;
+
+    const currentPixels = getCurrentFramePixels();
+    const basePixels = eraseSelection(currentPixels, selection);
+
+    const newX = Math.max(0, Math.min(CANVAS_SIZE - selection.width, selection.x + dx));
+    const newY = Math.max(0, Math.min(CANVAS_SIZE - selection.height, selection.y + dy));
+
+    if (newX === selection.x && newY === selection.y) return;
+
+    const pasted = pastePixels(basePixels, selectionPixels, newX, newY, selection.width, selection.height);
+    updateCurrentFramePixels(pasted);
+
+    set({
+      selection: {
+        ...selection,
+        x: newX,
+        y: newY
+      }
+    });
+
+    pushHistory();
   },
 
   copySelection: () => {
@@ -240,15 +275,18 @@ export const useSelectionStore = create<SelectionStore>((set, get) => ({
   },
 
   pasteSelection: (x: number, y: number) => {
-    const { clipboardPixels, clipboardSize, getCurrentFramePixels, updateCurrentFramePixels, pushHistory, selection } = get();
+    const { clipboardPixels, clipboardSize, getCurrentFramePixels, updateCurrentFramePixels, pushHistory } = get();
     if (!clipboardPixels || !clipboardSize) return;
+
+    const pasteX = Math.max(0, Math.min(CANVAS_SIZE - clipboardSize.width, x - Math.floor(clipboardSize.width / 2)));
+    const pasteY = Math.max(0, Math.min(CANVAS_SIZE - clipboardSize.height, y - Math.floor(clipboardSize.height / 2)));
 
     const currentPixels = getCurrentFramePixels();
     const pasted = pastePixels(
       currentPixels,
       clipboardPixels,
-      x - Math.floor(clipboardSize.width / 2),
-      y - Math.floor(clipboardSize.height / 2),
+      pasteX,
+      pasteY,
       clipboardSize.width,
       clipboardSize.height
     );
@@ -257,8 +295,8 @@ export const useSelectionStore = create<SelectionStore>((set, get) => ({
 
     set({
       selection: {
-        x: x - Math.floor(clipboardSize.width / 2),
-        y: y - Math.floor(clipboardSize.height / 2),
+        x: pasteX,
+        y: pasteY,
         width: clipboardSize.width,
         height: clipboardSize.height
       },

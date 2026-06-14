@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Play, Pause, SkipBack, SkipForward, Repeat, Settings } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Repeat, Settings, ArrowLeftRight } from 'lucide-react';
 import { usePixelStore } from '@/store/usePixelStore';
 import { useCanvasStore } from '@/store/useCanvasStore';
 import { createFrameThumbnailDataUrl } from '@/utils/exportUtils';
@@ -14,6 +14,9 @@ export default function AnimationPreview() {
   const loopStartIndex = usePixelStore(state => state.loopStartIndex);
   const loopEndIndex = usePixelStore(state => state.loopEndIndex);
   const setIsLoopPreviewing = usePixelStore(state => state.setIsLoopPreviewing);
+  const isPingPong = usePixelStore(state => state.isPingPong);
+  const setIsPingPong = usePixelStore(state => state.setIsPingPong);
+  const selectedFrameIndices = usePixelStore(state => state.selectedFrameIndices);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [previewZoom, setPreviewZoom] = useState(4);
@@ -23,6 +26,7 @@ export default function AnimationPreview() {
 
   const timeoutRef = useRef<number | null>(null);
   const playIndexRef = useRef(currentFrameIndex);
+  const playDirectionRef = useRef<1 | -1>(1);
 
   useEffect(() => {
     playIndexRef.current = currentFrameIndex;
@@ -43,7 +47,7 @@ export default function AnimationPreview() {
         clearTimeout(timeoutRef.current);
       }
     };
-  }, [isPlaying]);
+  }, [isPlaying, isPingPong, isLoopPreviewing, loopStartIndex, loopEndIndex]);
 
   const playNextFrame = () => {
     if (timeoutRef.current) {
@@ -56,17 +60,36 @@ export default function AnimationPreview() {
 
     setCurrentFrameIndex(currentIndex);
 
-    let nextIndex = currentIndex + 1;
-    const totalFrames = frames.length;
+    const startIdx = isLoopPreviewing ? loopStartIndex : 0;
+    const endIdx = isLoopPreviewing ? loopEndIndex : frames.length - 1;
 
-    if (isLoopPreviewing) {
-      if (nextIndex > loopEndIndex) {
-        nextIndex = loopStartIndex;
+    let nextIndex: number;
+    if (isPingPong) {
+      const direction = playDirectionRef.current;
+      nextIndex = currentIndex + direction;
+
+      if (nextIndex > endIdx) {
+        if (loop || isLoopPreviewing) {
+          nextIndex = endIdx - 1;
+          playDirectionRef.current = -1;
+        } else {
+          setIsPlaying(false);
+          return;
+        }
+      } else if (nextIndex < startIdx) {
+        if (loop || isLoopPreviewing) {
+          nextIndex = startIdx + 1;
+          playDirectionRef.current = 1;
+        } else {
+          setIsPlaying(false);
+          return;
+        }
       }
     } else {
-      if (nextIndex >= totalFrames) {
-        if (loop) {
-          nextIndex = 0;
+      nextIndex = currentIndex + 1;
+      if (nextIndex > endIdx) {
+        if (loop || isLoopPreviewing) {
+          nextIndex = startIdx;
         } else {
           setIsPlaying(false);
           return;
@@ -82,8 +105,13 @@ export default function AnimationPreview() {
 
   const togglePlay = () => {
     if (!isPlaying) {
+      playDirectionRef.current = 1;
       if (isLoopPreviewing) {
         playIndexRef.current = loopStartIndex;
+      } else if (selectedFrameIndices.length >= 2) {
+        const sorted = [...selectedFrameIndices].sort((a, b) => a - b);
+        usePixelStore.getState().setLoopPreview(sorted[0], sorted[sorted.length - 1]);
+        playIndexRef.current = sorted[0];
       } else {
         playIndexRef.current = currentFrameIndex;
       }
@@ -93,15 +121,16 @@ export default function AnimationPreview() {
 
   const goToFirst = () => {
     setIsPlaying(false);
-    setCurrentFrameIndex(0);
-    playIndexRef.current = 0;
+    const startIdx = isLoopPreviewing ? loopStartIndex : 0;
+    setCurrentFrameIndex(startIdx);
+    playIndexRef.current = startIdx;
   };
 
   const goToLast = () => {
     setIsPlaying(false);
-    const last = frames.length - 1;
-    setCurrentFrameIndex(last);
-    playIndexRef.current = last;
+    const endIdx = isLoopPreviewing ? loopEndIndex : frames.length - 1;
+    setCurrentFrameIndex(endIdx);
+    playIndexRef.current = endIdx;
   };
 
   const currentFrame = frames[currentFrameIndex];
@@ -161,7 +190,7 @@ export default function AnimationPreview() {
               : 'bg-pixel-surface-light border-pixel-border text-pixel-text hover:border-pixel-primary'
             }
           `}
-          title={isPlaying ? '暂停' : '播放'}
+          title={isPlaying ? '暂停' : selectedFrameIndices.length >= 2 ? '循环播放选中帧' : '播放'}
         >
           {isPlaying ? <Pause size={16} /> : <Play size={16} />}
         </button>
@@ -172,6 +201,25 @@ export default function AnimationPreview() {
           title="最后一帧"
         >
           <SkipForward size={14} />
+        </button>
+      </div>
+
+      <div className="flex items-center justify-center gap-3 mb-2">
+        <button
+          onClick={() => setLoop(!loop)}
+          className={`flex items-center gap-1 px-2 py-1 text-[10px] font-mono border-2 transition-colors ${loop ? 'bg-pixel-primary border-pixel-primary text-white' : 'bg-pixel-surface-light border-pixel-border text-pixel-text-muted hover:text-pixel-text'}`}
+          title="循环播放"
+        >
+          <Repeat size={10} />
+          循环
+        </button>
+        <button
+          onClick={() => setIsPingPong(!isPingPong)}
+          className={`flex items-center gap-1 px-2 py-1 text-[10px] font-mono border-2 transition-colors ${isPingPong ? 'bg-pixel-primary border-pixel-primary text-white' : 'bg-pixel-surface-light border-pixel-border text-pixel-text-muted hover:text-pixel-text'}`}
+          title="往返播放（走过去再走回来）"
+        >
+          <ArrowLeftRight size={10} />
+          往返
         </button>
       </div>
 
@@ -209,16 +257,6 @@ export default function AnimationPreview() {
               value={speed}
               onChange={(e) => setSpeed(parseFloat(e.target.value))}
             />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <label className="text-xs text-pixel-text-muted font-mono">循环播放</label>
-            <button
-              onClick={() => setLoop(!loop)}
-              className={`p-1.5 border-2 ${loop ? 'bg-pixel-primary border-pixel-primary text-white' : 'bg-pixel-surface-light border-pixel-border text-pixel-text-muted'}`}
-            >
-              <Repeat size={12} />
-            </button>
           </div>
         </div>
       )}
